@@ -1,10 +1,11 @@
 import datetime as dt
 import enum
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.db.types import UTCDateTime
 
 
 class TransactionStatus(str, enum.Enum):
@@ -40,9 +41,9 @@ class Transaction(Base):
     )
     reconcile_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
+        UTCDateTime(), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
     )
-    completed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
     @property
     def total(self) -> int:
@@ -61,7 +62,7 @@ class TransactionEvent(Base):
     new_status: Mapped[str | None] = mapped_column(String(20), nullable=True)
     payload: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
+        UTCDateTime(), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
     )
 
 
@@ -75,5 +76,5 @@ class IdempotencyKey(Base):
         ForeignKey("transactions.id"), nullable=True
     )
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
+        UTCDateTime(), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
     )

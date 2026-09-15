@@ -1,9 +1,10 @@
 import datetime as dt
 
-from sqlalchemy import Boolean, DateTime, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.db.types import UTCDateTime
 
 
 class ServiceProvider(Base):
@@ -18,7 +19,7 @@ class ServiceProvider(Base):
     name: Mapped[str] = mapped_column(String(80), nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
+        UTCDateTime(), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
     )
 
 
@@ -31,7 +32,7 @@ class AppSetting(Base):
     value_type: Mapped[str] = mapped_column(String(10), default="str", nullable=False)
     label: Mapped[str] = mapped_column(String(120), default="", nullable=False)
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True),
+        UTCDateTime(),
         default=lambda: dt.datetime.now(dt.timezone.utc),
         onupdate=lambda: dt.datetime.now(dt.timezone.utc),
         nullable=False,

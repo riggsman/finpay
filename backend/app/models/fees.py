@@ -1,9 +1,10 @@
 import datetime as dt
 
-from sqlalchemy import Boolean, DateTime, String, Text
+from sqlalchemy import Boolean, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.db.types import UTCDateTime
 
 
 class FeeRule(Base):
@@ -19,7 +20,7 @@ class FeeRule(Base):
     config: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
     active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True),
+        UTCDateTime(),
         default=lambda: dt.datetime.now(dt.timezone.utc),
         onupdate=lambda: dt.datetime.now(dt.timezone.utc),
         nullable=False,
@@ -36,7 +37,7 @@ class ServiceFlag(Base):
     kind: Mapped[str] = mapped_column(String(20), default="service", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True),
+        UTCDateTime(),
         default=lambda: dt.datetime.now(dt.timezone.utc),
         onupdate=lambda: dt.datetime.now(dt.timezone.utc),
         nullable=False,

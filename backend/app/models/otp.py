@@ -1,9 +1,10 @@
 import datetime as dt
 
-from sqlalchemy import DateTime, Integer, String
+from sqlalchemy import Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.db.types import UTCDateTime
 
 
 class OtpCode(Base):
@@ -15,7 +16,7 @@ class OtpCode(Base):
     code: Mapped[str] = mapped_column(String(12), nullable=False)
     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     consumed: Mapped[bool] = mapped_column(default=False, nullable=False)
-    expires_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[dt.datetime] = mapped_column(UTCDateTime(), nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
+        UTCDateTime(), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
     )

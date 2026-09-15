@@ -1,9 +1,10 @@
 import datetime as dt
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.db.types import UTCDateTime
 
 
 class SupportTicket(Base):
@@ -17,10 +18,10 @@ class SupportTicket(Base):
     # OPEN, IN_PROGRESS, RESOLVED, CLOSED
     status: Mapped[str] = mapped_column(String(20), default="OPEN", nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
+        UTCDateTime(), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
     )
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True),
+        UTCDateTime(),
         default=lambda: dt.datetime.now(dt.timezone.utc),
         onupdate=lambda: dt.datetime.now(dt.timezone.utc),
         nullable=False,
@@ -38,7 +39,7 @@ class SupportMessage(Base):
     sender: Mapped[str] = mapped_column(String(16), nullable=False)
     body: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
+        UTCDateTime(), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
     )
 
 
@@ -57,6 +58,6 @@ class TransactionDispute(Base):
     status: Mapped[str] = mapped_column(String(20), default="OPEN", nullable=False)
     resolution: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
+        UTCDateTime(), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
     )
-    resolved_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    resolved_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime(), nullable=True)

@@ -1,9 +1,10 @@
 import datetime as dt
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String
+from sqlalchemy import BigInteger, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.db.types import UTCDateTime
 
 
 class Wallet(Base):
@@ -15,10 +16,10 @@ class Wallet(Base):
     balance: Mapped[int] = mapped_column(BigInteger, default=0, nullable=False)
     currency: Mapped[str] = mapped_column(String(8), default="XAF", nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
+        UTCDateTime(), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
     )
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True),
+        UTCDateTime(),
         default=lambda: dt.datetime.now(dt.timezone.utc),
         onupdate=lambda: dt.datetime.now(dt.timezone.utc),
         nullable=False,
@@ -39,5 +40,5 @@ class LedgerEntry(Base):
     balance_after: Mapped[int] = mapped_column(BigInteger, nullable=False)
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
+        UTCDateTime(), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
     )

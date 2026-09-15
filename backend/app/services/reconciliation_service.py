@@ -107,14 +107,18 @@ def _reconcile_one(db: Session, txn: Transaction) -> None:
 
 
 def _claim_next(db: Session, extra_filters) -> Transaction | None:
-    """Claim one pending transaction with FOR UPDATE SKIP LOCKED so that
+    """Claim one pending transaction with FOR UPDATE NOWAIT so that
     concurrent workers (in-process + Celery) never process the same row."""
     q = db.query(Transaction).filter(
         Transaction.pending_reconciliation.is_(True),
         Transaction.status == TransactionStatus.PENDING.value,
         *extra_filters,
     )
-    return q.order_by(Transaction.id).with_for_update(skip_locked=True).first()
+    try:
+        return q.order_by(Transaction.id).with_for_update(nowait=True).first()
+    except Exception:
+        db.rollback()
+        return None
 
 
 def reconcile_pending(db: Session, min_age_seconds: float | None = None) -> int:

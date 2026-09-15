@@ -1,9 +1,10 @@
 import datetime as dt
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.db.types import UTCDateTime
 
 
 class Notification(Base):
@@ -19,6 +20,6 @@ class Notification(Base):
     priority: Mapped[str] = mapped_column(String(16), default="NORMAL", nullable=False)
     is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
+        UTCDateTime(), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
     )
-    read_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    read_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime(), nullable=True)

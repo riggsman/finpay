@@ -12,7 +12,8 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     API_V1_PREFIX: str = "/api/v1"
 
-    DATABASE_URL: str = "postgresql+psycopg2://finpay:finpay@localhost:5432/finpay"
+    DATABASE_URL: str = "mysql+pymysql://root@localhost:3306/finpay"
+    # DATABASE_URL: str = "postgresql+psycopg2://finpay:finpay@localhost:5432/finpay"
     REDIS_URL: str = "redis://localhost:6379/0"
 
     JWT_SECRET: str = "change-me-in-production-please-use-a-long-random-string"

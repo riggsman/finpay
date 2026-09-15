@@ -1,10 +1,11 @@
 import datetime as dt
 import enum
 
-from sqlalchemy import Date, DateTime, ForeignKey, String, Text
+from sqlalchemy import Date, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.db.types import UTCDateTime
 
 
 class KycStatus(str, enum.Enum):
@@ -41,13 +42,13 @@ class KycProfile(Base):
     selfie_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    submitted_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    reviewed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    submitted_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime(), nullable=True)
+    reviewed_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime(), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
+        UTCDateTime(), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
     )
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True),
+        UTCDateTime(),
         default=lambda: dt.datetime.now(dt.timezone.utc),
         onupdate=lambda: dt.datetime.now(dt.timezone.utc),
         nullable=False,

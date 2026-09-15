@@ -1,11 +1,12 @@
 import datetime as dt
 import enum
 
-from sqlalchemy import BigInteger, Boolean, DateTime, Enum, String
+from sqlalchemy import BigInteger, Boolean, Enum, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.config import settings
 from app.db.base import Base
+from app.db.types import UTCDateTime
 
 
 class UserStatus(str, enum.Enum):
@@ -42,15 +43,15 @@ class User(Base):
     phone_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_admin: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
+        UTCDateTime(), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
     )
     updated_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True),
+        UTCDateTime(),
         default=lambda: dt.datetime.now(dt.timezone.utc),
         onupdate=lambda: dt.datetime.now(dt.timezone.utc),
         nullable=False,
     )
-    last_login_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_login_at: Mapped[dt.datetime | None] = mapped_column(UTCDateTime(), nullable=True)
 
     @property
     def is_active(self) -> bool:

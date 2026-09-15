@@ -1,9 +1,10 @@
 import datetime as dt
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.db.types import UTCDateTime
 
 
 class AuditLog(Base):
@@ -22,6 +23,6 @@ class AuditLog(Base):
     request_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
     meta: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc),
+        UTCDateTime(), default=lambda: dt.datetime.now(dt.timezone.utc),
         index=True, nullable=False,
     )

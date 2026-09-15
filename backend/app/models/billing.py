@@ -1,9 +1,10 @@
 import datetime as dt
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String
+from sqlalchemy import BigInteger, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+from app.db.types import UTCDateTime
 
 
 class ElectricityValidation(Base):
@@ -16,9 +17,9 @@ class ElectricityValidation(Base):
     meter_number: Mapped[str] = mapped_column(String(40), nullable=False)
     customer_name: Mapped[str] = mapped_column(String(160), nullable=False)
     consumed: Mapped[bool] = mapped_column(default=False, nullable=False)
-    expires_at: Mapped[dt.datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[dt.datetime] = mapped_column(UTCDateTime(), nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
+        UTCDateTime(), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
     )
 
 
@@ -37,5 +38,5 @@ class BillPayment(Base):
     amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
     token: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
-        DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
+        UTCDateTime(), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
     )
