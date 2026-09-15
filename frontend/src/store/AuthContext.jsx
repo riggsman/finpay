@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { setAccessToken } from "../api/client";
 import { socketService } from "../services/socketService";
+import { registerDevice } from "../services/pushService";
 
 const AuthContext = createContext(null);
 
@@ -21,6 +22,8 @@ export function AuthProvider({ children }) {
       setAccessToken(auth.access_token);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(auth));
       socketService.connect(auth.access_token);
+      // Register this device for push (best-effort; no-op without FCM config).
+      registerDevice();
     } else {
       setAccessToken(null);
       localStorage.removeItem(STORAGE_KEY);

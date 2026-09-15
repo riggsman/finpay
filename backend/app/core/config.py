@@ -52,6 +52,20 @@ class Settings(BaseSettings):
 
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 
+    # --- Firebase Cloud Messaging (push) ---
+    # Provide EITHER the full service-account JSON in FCM_SERVICE_ACCOUNT_JSON,
+    # OR the three individual fields below, OR set GOOGLE_APPLICATION_CREDENTIALS
+    # to a service-account file path. Leave all empty to disable FCM (the app
+    # still runs and delivers via Socket.IO only).
+    FCM_SERVICE_ACCOUNT_JSON: str = ""
+    FIREBASE_PROJECT_ID: str = ""
+    FIREBASE_CLIENT_EMAIL: str = ""
+    FIREBASE_PRIVATE_KEY: str = ""
+    GOOGLE_APPLICATION_CREDENTIALS: str = ""
+    # Also send FCM (in addition to Socket.IO) for these priorities even when the
+    # user is connected. Otherwise FCM is only used when the user is offline.
+    FCM_ALWAYS_PRIORITIES: str = "CRITICAL"
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
@@ -59,6 +73,18 @@ class Settings(BaseSettings):
     @property
     def use_redis(self) -> bool:
         return bool(self.REDIS_URL)
+
+    @property
+    def fcm_always_priorities(self) -> set[str]:
+        return {p.strip().upper() for p in self.FCM_ALWAYS_PRIORITIES.split(",") if p.strip()}
+
+    @property
+    def fcm_configured(self) -> bool:
+        return bool(
+            self.FCM_SERVICE_ACCOUNT_JSON
+            or self.GOOGLE_APPLICATION_CREDENTIALS
+            or (self.FIREBASE_PROJECT_ID and self.FIREBASE_CLIENT_EMAIL and self.FIREBASE_PRIVATE_KEY)
+        )
 
 
 @lru_cache

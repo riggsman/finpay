@@ -13,6 +13,7 @@ from app.routers import (
     auth,
     bill_payments,
     dashboard,
+    devices,
     kyc,
     notifications,
     security,
@@ -84,13 +85,18 @@ async def add_request_id(request: Request, call_next):
 
 @app.get("/health", tags=["system"])
 def health():
-    return {"status": "ok", "service": settings.APP_NAME}
+    return {
+        "status": "ok",
+        "service": settings.APP_NAME,
+        "fcm_enabled": settings.fcm_configured,
+    }
 
 
 api = settings.API_V1_PREFIX
 app.include_router(auth.router, prefix=api)
 app.include_router(users.router, prefix=api)
 app.include_router(security.router, prefix=api)
+app.include_router(devices.router, prefix=api)
 app.include_router(kyc.router, prefix=api)
 app.include_router(wallet.router, prefix=api)
 app.include_router(transactions.router, prefix=api)

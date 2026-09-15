@@ -47,7 +47,11 @@ def create_notification(
 
 
 def deliver_notification(notification: Notification) -> None:
-    """Emit the persisted notification to the user's realtime room."""
+    """Deliver a persisted notification over Socket.IO and, per policy, FCM.
+
+    The database notification is the source of truth; Socket.IO and FCM are
+    delivery channels (SRS sections 20 and 52).
+    """
     emit_to_user(
         notification.user_id,
         "notification:new",
@@ -60,3 +64,7 @@ def deliver_notification(notification: Notification) -> None:
         },
         event_id=notification.event_id,
     )
+    # Complementary background push (no-op when FCM is not configured).
+    from app.notifications import fcm
+
+    fcm.maybe_send(notification)

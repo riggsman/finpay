@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { authApi } from "../api/auth";
 import { securityApi } from "../api/security";
+import { devicesApi } from "../api/devices";
+import { registerDevice, isConfigured } from "../services/pushService";
 import { useAuth } from "../store/AuthContext";
 
 function Section({ title, children }) {
@@ -38,6 +40,10 @@ export default function Security() {
   const [sessions, setSessions] = useState([]);
   const [sessMsg, setSessMsg] = useState(null);
 
+  const [fcmEnabled, setFcmEnabled] = useState(false);
+  const [devices, setDevices] = useState([]);
+  const [pushMsg, setPushMsg] = useState(null);
+
   useEffect(() => {
     authApi.me().then((me) =>
       setProfile({ first_name: me.first_name || "", last_name: me.last_name || "", email: me.email || "" })
@@ -46,10 +52,29 @@ export default function Security() {
       setLimits({ per_txn_limit: l.per_txn_limit / 100, daily_limit: l.daily_limit / 100 })
     ).catch(() => {});
     refreshSessions();
+    devicesApi.config().then((c) => setFcmEnabled(c.fcm_enabled)).catch(() => {});
+    refreshDevices();
   }, []);
 
   function refreshSessions() {
     securityApi.listSessions().then(setSessions).catch(() => {});
+  }
+
+  function refreshDevices() {
+    devicesApi.list().then(setDevices).catch(() => {});
+  }
+
+  async function enablePush() {
+    setPushMsg(null);
+    const res = await registerDevice();
+    refreshDevices();
+    if (!isConfigured()) {
+      setPushMsg("Push is not configured in this build. Device registered without a push token.");
+    } else if (res.push) {
+      setPushMsg("Push enabled on this device.");
+    } else {
+      setPushMsg("Device registered. Allow notifications to receive push.");
+    }
   }
 
   async function saveProfile(e) {
@@ -189,6 +214,33 @@ export default function Security() {
         <Note msg={sessMsg} />
         <div className="mt">
           <button className="btn-ghost" onClick={revokeAll}>Sign out all other devices</button>
+        </div>
+      </Section>
+
+      <Section title="Notifications & devices">
+        <p className="muted small">
+          Push delivery is <strong style={{ color: fcmEnabled ? "var(--accent)" : "var(--muted)" }}>
+            {fcmEnabled ? "enabled" : "not configured"}
+          </strong> on the server.
+        </p>
+        {devices.length === 0 ? (
+          <div className="empty">No devices registered.</div>
+        ) : (
+          devices.map((d) => (
+            <div className="txn" key={d.id}>
+              <div className="meta">
+                <span>{d.device_type} · {d.device_id.slice(0, 16)}…</span>
+                <span className="muted small">last seen {new Date(d.last_seen_at).toLocaleString()}</span>
+              </div>
+              <span className={`badge ${d.has_push_token ? "SUCCESS" : ""}`}>
+                {d.has_push_token ? "PUSH ON" : "NO TOKEN"}
+              </span>
+            </div>
+          ))
+        )}
+        <Note msg={pushMsg} />
+        <div className="mt">
+          <button className="btn-ghost" onClick={enablePush}>Enable push on this device</button>
         </div>
       </Section>
     </div>

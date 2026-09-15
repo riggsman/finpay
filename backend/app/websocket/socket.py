@@ -36,6 +36,14 @@ sio = _build_server()
 # (which run in a threadpool) can schedule socket emissions safely.
 _loop: asyncio.AbstractEventLoop | None = None
 
+# Track how many live socket connections each user has, so the notification
+# dispatcher can decide whether to also deliver via FCM (SRS section 52).
+_connection_counts: dict[int, int] = {}
+
+
+def is_user_connected(user_id: int) -> bool:
+    return _connection_counts.get(user_id, 0) > 0
+
 
 def set_loop(loop: asyncio.AbstractEventLoop) -> None:
     global _loop
@@ -85,6 +93,7 @@ async def connect(sid, environ, auth):
         raise socketio.exceptions.ConnectionRefusedError("authentication_failed")
     await sio.save_session(sid, {"user_id": user_id})
     await sio.enter_room(sid, f"user:{user_id}")
+    _connection_counts[user_id] = _connection_counts.get(user_id, 0) + 1
     logger.info("Socket connected sid=%s user=%s", sid, user_id)
     await sio.emit(
         "connection:ready",
@@ -95,6 +104,15 @@ async def connect(sid, environ, auth):
 
 @sio.event
 async def disconnect(sid):
+    try:
+        session = await sio.get_session(sid)
+        user_id = session.get("user_id")
+    except Exception:
+        user_id = None
+    if user_id is not None and _connection_counts.get(user_id):
+        _connection_counts[user_id] -= 1
+        if _connection_counts[user_id] <= 0:
+            _connection_counts.pop(user_id, None)
     logger.info("Socket disconnected sid=%s", sid)
 
 

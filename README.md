@@ -85,3 +85,28 @@ backend/app/
 
 In development, OTP codes are returned in the API response (`EXPOSE_OTP_IN_RESPONSE=true`)
 to simplify testing.
+
+## Push notifications (FCM)
+
+Socket.IO delivers realtime updates to active sessions; Firebase Cloud
+Messaging (FCM) delivers background push. Notifications are always persisted
+first (the database is the source of truth) and pushed when the user has no
+active socket session, or always for `CRITICAL` events (`FCM_ALWAYS_PRIORITIES`).
+
+FCM is **optional** — without credentials the app runs and delivers via
+Socket.IO only; devices are still registered (without a push token). To enable
+push, supply only the credential values:
+
+Backend (any one of these):
+- `FCM_SERVICE_ACCOUNT_JSON` — the full Firebase service-account JSON (recommended single secret), or
+- `FIREBASE_PROJECT_ID` + `FIREBASE_CLIENT_EMAIL` + `FIREBASE_PRIVATE_KEY`, or
+- `GOOGLE_APPLICATION_CREDENTIALS` — path to a service-account file.
+
+Frontend (Firebase web app config):
+- `VITE_FIREBASE_API_KEY`, `VITE_FIREBASE_AUTH_DOMAIN`, `VITE_FIREBASE_PROJECT_ID`,
+  `VITE_FIREBASE_MESSAGING_SENDER_ID`, `VITE_FIREBASE_APP_ID`, `VITE_FIREBASE_VAPID_KEY`.
+
+Each browser/device registers itself on login via `POST /api/v1/me/devices`
+(`device_id`, `device_type`, `push_token`); tokens are de-duplicated and moved
+between accounts safely, and invalid tokens are deactivated automatically.
+`GET /api/v1/me/devices/config` reports whether the server has FCM configured.

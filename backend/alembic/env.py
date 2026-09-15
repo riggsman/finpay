@@ -18,6 +18,7 @@ import app.models.password_reset  # noqa: F401
 import app.models.kyc  # noqa: F401
 import app.models.support  # noqa: F401
 import app.models.social  # noqa: F401
+import app.models.device  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
