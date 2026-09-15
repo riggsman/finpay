@@ -26,7 +26,7 @@ from app.schemas.auth import (
     UserPublic,
     VerifyOtpRequest,
 )
-from app.services import audit_service, auth_service, password_reset_service
+from app.services import audit_service, auth_service, fee_service, password_reset_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -66,6 +66,7 @@ def verify_otp(payload: VerifyOtpRequest, db: Session = Depends(get_db)):
         refresh_token=refresh,
         expires_in=settings.ACCESS_TOKEN_EXPIRE_SECONDS,
         user=UserPublic.model_validate(user),
+        config=fee_service.get_client_config(db),
     )
 
 
@@ -128,6 +129,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         refresh_token=refresh,
         expires_in=settings.ACCESS_TOKEN_EXPIRE_SECONDS,
         user=UserPublic.model_validate(user),
+        config=fee_service.get_client_config(db),
     )
 
 

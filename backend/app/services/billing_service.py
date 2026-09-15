@@ -17,7 +17,7 @@ from app.models.transaction import (
 )
 from app.models.user import User
 from app.models.wallet import LedgerEntry
-from app.services import audit_service, security_service, wallet_service
+from app.services import audit_service, fee_service, security_service, wallet_service
 from app.services.notification_service import create_notification, deliver_notification
 from app.websocket.socket import emit_to_transaction, emit_to_user
 
@@ -73,6 +73,7 @@ def confirm_topup(db: Session, user: User, category: str, provider_id: str,
         raise ValidationError("Unknown provider.", code="UNKNOWN_PROVIDER")
     if amount <= 0:
         raise ValidationError("Amount must be positive.", code="INVALID_AMOUNT")
+    fee_service.ensure_enabled(db, category)
     if not user.transaction_pin_hash or not verify_password(pin, user.transaction_pin_hash):
         raise AuthError("Incorrect transaction PIN.", code="INVALID_PIN")
 
@@ -88,8 +89,9 @@ def confirm_topup(db: Session, user: User, category: str, provider_id: str,
             if existing:
                 return existing
 
+    fee = fee_service.compute_fee(db, category.upper(), amount)
     wallet = wallet_service.get_wallet(db, user.id)
-    if wallet.balance < amount:
+    if wallet.balance < amount + fee:
         raise ValidationError("Insufficient wallet balance.", code="INSUFFICIENT_BALANCE")
     security_service.check_limits(db, user, amount)
 
@@ -100,7 +102,7 @@ def confirm_topup(db: Session, user: User, category: str, provider_id: str,
         type=category.upper(),
         status=TransactionStatus.CREATED.value,
         amount=amount,
-        fee=0,
+        fee=fee,
         currency=wallet.currency,
         description=f"{provider_name} {category} for {target}",
     )
@@ -130,7 +132,8 @@ def confirm_topup(db: Session, user: User, category: str, provider_id: str,
         return txn
 
     txn.provider_reference = "prov_" + uuid.uuid4().hex[:12]
-    balance = wallet_service.apply_ledger(db, wallet, "DEBIT", amount, txn.id, txn.description)
+    balance = wallet_service.apply_ledger(db, wallet, "DEBIT", amount + fee, txn.id,
+                                          txn.description)
     txn.status = TransactionStatus.SUCCESS.value
     txn.completed_at = _now()
     wallet_service.record_event(db, txn, "TRANSACTION_SUCCESS",
@@ -189,6 +192,7 @@ def confirm_electricity(db: Session, user: User, validation_token: str, amount: 
     if amount <= 0:
         raise ValidationError("Amount must be positive.", code="INVALID_AMOUNT")
 
+    fee_service.ensure_enabled(db, "electricity")
     # Verify transaction PIN / authorization (SRS section 39).
     if not user.transaction_pin_hash or not verify_password(pin, user.transaction_pin_hash):
         raise AuthError("Incorrect transaction PIN.", code="INVALID_PIN")
@@ -222,8 +226,9 @@ def confirm_electricity(db: Session, user: User, validation_token: str, amount: 
         raise ValidationError("Validation token expired. Please re-validate the meter.",
                               code="VALIDATION_EXPIRED")
 
+    fee = fee_service.compute_fee(db, "ELECTRICITY", amount)
     wallet = wallet_service.get_wallet(db, user.id)
-    if wallet.balance < amount:
+    if wallet.balance < amount + fee:
         raise ValidationError("Insufficient wallet balance.", code="INSUFFICIENT_BALANCE")
     security_service.check_limits(db, user, amount)
 
@@ -235,7 +240,7 @@ def confirm_electricity(db: Session, user: User, validation_token: str, amount: 
         type="ELECTRICITY",
         status=TransactionStatus.CREATED.value,
         amount=amount,
-        fee=0,
+        fee=fee,
         currency=wallet.currency,
         description=f"Electricity • {ELECTRICITY_PROVIDERS[validation.provider_id]['name']} • {validation.meter_number}",
     )
@@ -342,18 +347,19 @@ def _complete_provider_operation(transaction_id: int, user_id: int,
 
         if provider_success:
             wallet = wallet_service.get_wallet(db, user_id)
-            if wallet.balance < txn.amount:
+            charge = txn.amount + txn.fee
+            if wallet.balance < charge:
                 _fail(db, txn, user_id, "INSUFFICIENT_BALANCE",
                       "Insufficient balance at settlement.")
                 return
             txn.provider_reference = "prov_" + uuid.uuid4().hex[:12]
-            wallet.balance -= txn.amount
+            wallet.balance -= charge
             db.add(
                 LedgerEntry(
                     wallet_id=wallet.id,
                     transaction_id=txn.id,
                     direction="DEBIT",
-                    amount=txn.amount,
+                    amount=charge,
                     balance_after=wallet.balance,
                     description=txn.description,
                 )

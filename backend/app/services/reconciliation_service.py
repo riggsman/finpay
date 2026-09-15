@@ -37,12 +37,13 @@ def _provider_inquiry(txn: Transaction, db: Session) -> str:
 
 def _settle_success(db: Session, txn: Transaction) -> None:
     wallet = wallet_service.get_wallet(db, txn.user_id)
-    if wallet.balance < txn.amount:
+    charge = txn.amount + txn.fee
+    if wallet.balance < charge:
         _settle_failed(db, txn, "Insufficient balance at reconciliation.")
         return
     txn.provider_reference = txn.provider_reference or ("prov_" + uuid.uuid4().hex[:12])
     balance = wallet_service.apply_ledger(
-        db, wallet, "DEBIT", txn.amount, txn.id, txn.description
+        db, wallet, "DEBIT", charge, txn.id, txn.description
     )
     txn.status = TransactionStatus.SUCCESS.value
     txn.completed_at = _now()

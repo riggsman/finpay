@@ -40,6 +40,11 @@ class Settings(BaseSettings):
 
     # Default transaction PIN assigned at activation (development convenience).
     DEFAULT_TRANSACTION_PIN: str = "1234"
+
+    # Back Office bootstrap admin (seeded on startup for development).
+    ADMIN_EMAIL: str = "admin@finpay.app"
+    ADMIN_PHONE: str = "+237600000001"
+    ADMIN_PASSWORD: str = "admin1234"
     # Validation token lifetime for bill payments (seconds).
     VALIDATION_TOKEN_TTL_SECONDS: int = 300
     # Simulated provider processing delay (seconds) for the electricity flow.

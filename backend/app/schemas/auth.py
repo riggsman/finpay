@@ -50,6 +50,7 @@ class UserPublic(BaseModel):
     status: str
     phone_verified: bool
     email_verified: bool
+    is_admin: bool = False
 
     class Config:
         from_attributes = True
@@ -61,6 +62,7 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
     expires_in: int
     user: UserPublic
+    config: dict | None = None
 
 
 class MessageResponse(BaseModel):

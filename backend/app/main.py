@@ -10,8 +10,10 @@ from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
 from app.routers import (
+    admin,
     auth,
     bill_payments,
+    config as config_router,
     dashboard,
     devices,
     kyc,
@@ -50,6 +52,19 @@ async def _reconciliation_worker():
 async def lifespan(app: FastAPI):
     # Capture the running loop so sync request handlers can emit socket events.
     set_loop(asyncio.get_running_loop())
+
+    # Seed default fee rules, service flags, and the Back Office admin.
+    from app.db.database import SessionLocal
+    from app.services.bootstrap import seed_all
+
+    db = SessionLocal()
+    try:
+        seed_all(db)
+    except Exception:
+        logger.exception("Bootstrap seeding failed")
+    finally:
+        db.close()
+
     logger.info("FinPay backend started (env=%s)", settings.ENVIRONMENT)
     worker = None
     if settings.RECONCILE_WORKER_ENABLED:
@@ -117,6 +132,8 @@ app.include_router(services.router, prefix=api)
 app.include_router(bill_payments.router, prefix=api)
 app.include_router(support.router, prefix=api)
 app.include_router(social.router, prefix=api)
+app.include_router(config_router.router, prefix=api)
+app.include_router(admin.router, prefix=api)
 
 # Wrap the FastAPI app with the Socket.IO ASGI app so both share one server.
 asgi = socketio.ASGIApp(sio, other_asgi_app=app, socketio_path="socket.io")

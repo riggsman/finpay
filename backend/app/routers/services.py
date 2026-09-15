@@ -1,20 +1,22 @@
 from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
+from app.db.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.user import User
+from app.services import fee_service
 
 router = APIRouter(tags=["services"])
 
-# Static catalog for the MVP. In later milestones this is backed by the
-# service_categories / service_providers tables.
-_SERVICES = [
-    {"id": "electricity", "name": "Electricity", "enabled": True},
-    {"id": "airtime", "name": "Airtime", "enabled": True},
-    {"id": "data", "name": "Data Bundles", "enabled": True},
-    {"id": "water", "name": "Water", "enabled": False},
-]
-
 
 @router.get("/services")
-def list_services(current_user: User = Depends(get_current_user)):
-    return {"services": _SERVICES}
+def list_services(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    # Front-store service tiles are driven by Back Office service flags.
+    flags = [f for f in fee_service.get_service_flags(db) if f["kind"] == "service"]
+    return {
+        "services": [
+            {"id": f["key"], "name": f["label"], "enabled": f["enabled"]} for f in flags
+        ]
+    }

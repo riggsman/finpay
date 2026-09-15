@@ -12,7 +12,7 @@ from app.models.transaction import (
     TransactionStatus,
 )
 from app.models.wallet import LedgerEntry, Wallet
-from app.services import audit_service
+from app.services import audit_service, fee_service
 from app.services.notification_service import create_notification, deliver_notification
 from app.websocket.socket import emit_to_transaction, emit_to_user
 
@@ -81,6 +81,7 @@ def add_money(db: Session, user_id: int, amount: int, funding_method: str,
     """
     if amount <= 0:
         raise ValidationError("Amount must be positive.", code="INVALID_AMOUNT")
+    fee_service.ensure_enabled(db, "add_money")
 
     # Idempotency (SRS section 33).
     if idempotency_key:
@@ -99,13 +100,19 @@ def add_money(db: Session, user_id: int, amount: int, funding_method: str,
 
     wallet = get_wallet(db, user_id)
 
+    # Deposit fee is deducted from the credited amount (SRS 71.3).
+    fee = fee_service.compute_fee(db, "DEPOSIT", amount)
+    if fee >= amount:
+        raise ValidationError("Fee exceeds deposit amount.", code="FEE_EXCEEDS_AMOUNT")
+    credited = amount - fee
+
     txn = Transaction(
         reference="txn_" + uuid.uuid4().hex[:16],
         user_id=user_id,
         type="ADD_MONEY",
         status=TransactionStatus.CREATED.value,
         amount=amount,
-        fee=0,
+        fee=fee,
         currency=wallet.currency,
         description=f"Add money via {funding_method}",
     )
@@ -128,15 +135,15 @@ def add_money(db: Session, user_id: int, amount: int, funding_method: str,
     _record_event(db, txn, "TRANSACTION_PROCESSING",
                   TransactionStatus.PENDING.value, TransactionStatus.PROCESSING.value)
 
-    # Simulated provider success -> commit ledger + wallet.
+    # Simulated provider success -> commit ledger + wallet (net of fee).
     txn.provider_reference = "prov_" + uuid.uuid4().hex[:12]
-    wallet.balance += amount
+    wallet.balance += credited
     db.add(
         LedgerEntry(
             wallet_id=wallet.id,
             transaction_id=txn.id,
             direction="CREDIT",
-            amount=amount,
+            amount=credited,
             balance_after=wallet.balance,
             description=txn.description,
         )

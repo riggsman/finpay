@@ -20,4 +20,5 @@ from app.models import (  # noqa: E402,F401
     social,
     device,
     audit,
+    fees,
 )

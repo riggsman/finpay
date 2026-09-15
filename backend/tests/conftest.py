@@ -21,10 +21,46 @@ def _fast_provider():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _reset_fees_and_services():
+    """Reset fee rules to zero and enable all services before each test so the
+    fee configuration (which persists in the shared DB) never leaks between
+    tests."""
+    import json
+
+    from app.db.database import SessionLocal
+    from app.models.fees import FeeRule, ServiceFlag
+    from app.services import fee_service
+
+    db = SessionLocal()
+    try:
+        fee_service.seed_defaults(db)
+        db.query(FeeRule).update(
+            {FeeRule.fee_type: "FLAT", FeeRule.config: json.dumps({"fee": 0}),
+             FeeRule.active: True}
+        )
+        db.query(ServiceFlag).update({ServiceFlag.enabled: True})
+        db.commit()
+    finally:
+        db.close()
+    yield
+
+
 @pytest.fixture()
 def client():
     with TestClient(app) as c:
         yield c
+
+
+@pytest.fixture(scope="session")
+def admin_token():
+    """Log in the seeded Back Office admin once for the whole session."""
+    with TestClient(app) as c:
+        r = c.post(
+            f"{API}/auth/login",
+            json={"identifier": settings.ADMIN_EMAIL, "password": settings.ADMIN_PASSWORD},
+        )
+        return r.json()["access_token"]
 
 
 def unique_phone() -> str:

@@ -2441,3 +2441,124 @@ M10 PASS
 ```
 
 This dependency-first approach minimizes rework and ensures that the FinPay/FinPau screens are backed by a coherent transaction, notification, security, and real-time architecture.
+
+---
+
+# 71. Service Fees
+
+Every money-movement operation may carry a **service fee** that is added to (for
+debits) or deducted from (for deposits) the transaction amount. Fees are not
+hard-coded: they are configured in the Back Office (section 72) and are
+**variable per operation**.
+
+## 71.1 Fee-bearing operations
+
+Each of the following operations has its own independently configurable fee:
+
+```text
+DEPOSIT (Add Money)
+WITHDRAW
+SEND_MONEY (Transfer)
+ELECTRICITY (Utility)
+AIRTIME
+DATA
+```
+
+## 71.2 Fee models
+
+An operation's fee rule uses one of the following models:
+
+- **FLAT** — a single fixed fee regardless of amount.
+- **PERCENTAGE** — a percentage of the amount (for example `2.5%`), with
+  optional minimum and maximum fee clamps.
+- **TIERED** — fixed fees per amount range, for example:
+
+```text
+0     – 1000 XAF  → 150 XAF
+1001  – 1500 XAF  → 250 XAF
+1501  – 5000 XAF  → 400 XAF
+...
+```
+
+Amounts and fees are expressed in minor currency units internally; the Back
+Office may present and accept values in major units.
+
+## 71.3 Fee application
+
+- The fee for an operation is resolved from the active fee rule for that
+  operation and the requested amount.
+- **Debits** (withdraw, transfer, utility, airtime, data): the wallet is
+  charged `amount + fee`. The transaction records `amount` and `fee`; `total =
+  amount + fee`.
+- **Deposit** (add money): the fee is deducted from the deposit, so the wallet
+  is credited `amount − fee`.
+- The applied fee must be **persisted on the transaction** (`fee` column) and
+  reflected in the ledger and receipts.
+- The backend is authoritative: it re-computes and validates the fee on every
+  request; a client-side estimate is never trusted for settlement.
+
+## 71.4 Client experience
+
+- On login the server returns the current fee and feature configuration; the
+  client **caches** it.
+- Before an operation is confirmed, the client uses the cached configuration to
+  **display the service fee and the total** to the user without a round trip.
+- When the request is sent, the backend re-computes the fee and settles using
+  its own value (the client estimate is informational only).
+- A fee-quote endpoint is also available so the client can refresh a quote for
+  an operation and amount on demand.
+
+## 71.5 Acceptance criteria
+
+```text
+FEE-001  Each fee-bearing operation has an independently configurable fee.
+FEE-002  FLAT, PERCENTAGE, and TIERED fee models are supported.
+FEE-003  Percentage fees support optional min/max clamps.
+FEE-004  The fee is displayed to the client before confirmation.
+FEE-005  The backend re-computes and applies the authoritative fee.
+FEE-006  The applied fee is persisted on the transaction and receipt.
+FEE-007  Debits charge amount + fee; deposits credit amount − fee.
+FEE-008  Fee configuration is delivered on login and cacheable by the client.
+```
+
+---
+
+# 72. Back Office (Administration) Management UI
+
+The **Back Office (BO)** is an administration console, separate from the
+customer-facing **front store**, that lets operators manage and control the
+platform's features and fees. Access is restricted to users with an
+administrator role.
+
+## 72.1 Capabilities
+
+- **Fee management** — create and edit the fee rule for each operation:
+  choose the model (FLAT / PERCENTAGE / TIERED), set the percentage (and
+  optional min/max), or manage tier rows (amount range → fee), and
+  activate/deactivate a rule. Changes take effect immediately for subsequent
+  operations.
+- **Feature / service control** — enable or disable the services and
+  operations exposed by the front store (for example Electricity, Airtime,
+  Data, Send Money, Withdraw, Add Money). A disabled service is hidden from the
+  front store and its operation is rejected by the backend.
+- **Operational overview** — high-level metrics (users, transactions,
+  processed volume, fees collected) for monitoring.
+
+## 72.2 Security
+
+- BO endpoints require an authenticated administrator (`is_admin`).
+- All BO changes are recorded in the audit log (actor, action, entity, result).
+- The front store and BO share the same authentication system but the BO UI is
+  reachable only by administrators.
+
+## 72.3 Acceptance criteria
+
+```text
+BO-001  Only administrators can access BO endpoints and UI.
+BO-002  Admins can set a variable fee (flat/percentage/tiered) per operation.
+BO-003  Fee changes apply immediately to new operations.
+BO-004  Admins can enable/disable front-store services and operations.
+BO-005  Disabling a service hides it from the front store and blocks its API.
+BO-006  BO changes are audited.
+BO-007  The BO exposes an operational overview of platform metrics.
+```

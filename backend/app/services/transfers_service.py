@@ -8,7 +8,7 @@ from app.core.exceptions import AuthError, NotFoundError, ValidationError
 from app.core.security import verify_password
 from app.models.transaction import IdempotencyKey, Transaction, TransactionStatus
 from app.models.user import User, UserStatus
-from app.services import audit_service, security_service, wallet_service
+from app.services import audit_service, fee_service, security_service, wallet_service
 from app.services.notification_service import create_notification, deliver_notification
 from app.websocket.socket import emit_to_user
 
@@ -53,6 +53,7 @@ def send_money(db: Session, sender: User, recipient_identifier: str, amount: int
                pin: str, idempotency_key: str | None) -> Transaction:
     if amount <= 0:
         raise ValidationError("Amount must be positive.", code="INVALID_AMOUNT")
+    fee_service.ensure_enabled(db, "send_money")
     _check_pin(sender, pin)
 
     hit = _idempotent_hit(db, sender.id, idempotency_key)
@@ -69,8 +70,9 @@ def send_money(db: Session, sender: User, recipient_identifier: str, amount: int
     if recipient.id == sender.id:
         raise ValidationError("You cannot send money to yourself.", code="SELF_TRANSFER")
 
+    fee = fee_service.compute_fee(db, "SEND_MONEY", amount)
     sender_wallet = wallet_service.get_wallet(db, sender.id)
-    if sender_wallet.balance < amount:
+    if sender_wallet.balance < amount + fee:
         raise ValidationError("Insufficient wallet balance.", code="INSUFFICIENT_BALANCE")
     security_service.check_limits(db, sender, amount)
     recipient_wallet = wallet_service.get_wallet(db, recipient.id)
@@ -81,6 +83,7 @@ def send_money(db: Session, sender: User, recipient_identifier: str, amount: int
     # Sender (debit) transaction.
     sender_txn = _new_txn(sender.id, "SEND_MONEY", amount, sender_wallet.currency,
                           f"Transfer to {recipient_name}")
+    sender_txn.fee = fee
     db.add(sender_txn)
     db.flush()
     if idempotency_key:
@@ -98,7 +101,7 @@ def send_money(db: Session, sender: User, recipient_identifier: str, amount: int
                                     TransactionStatus.CREATED.value)
 
     sender_balance = wallet_service.apply_ledger(
-        db, sender_wallet, "DEBIT", amount, sender_txn.id, sender_txn.description
+        db, sender_wallet, "DEBIT", amount + fee, sender_txn.id, sender_txn.description
     )
     recipient_balance = wallet_service.apply_ledger(
         db, recipient_wallet, "CREDIT", amount, recipient_txn.id, recipient_txn.description
@@ -158,19 +161,22 @@ def withdraw(db: Session, user: User, amount: int, destination: str, pin: str,
              idempotency_key: str | None) -> Transaction:
     if amount <= 0:
         raise ValidationError("Amount must be positive.", code="INVALID_AMOUNT")
+    fee_service.ensure_enabled(db, "withdraw")
     _check_pin(user, pin)
 
     hit = _idempotent_hit(db, user.id, idempotency_key)
     if hit:
         return hit
 
+    fee = fee_service.compute_fee(db, "WITHDRAW", amount)
     wallet = wallet_service.get_wallet(db, user.id)
-    if wallet.balance < amount:
+    if wallet.balance < amount + fee:
         raise ValidationError("Insufficient wallet balance.", code="INSUFFICIENT_BALANCE")
     security_service.check_limits(db, user, amount)
 
     txn = _new_txn(user.id, "WITHDRAW", amount, wallet.currency,
                    f"Withdrawal to {destination}")
+    txn.fee = fee
     db.add(txn)
     db.flush()
     if idempotency_key:
@@ -183,7 +189,8 @@ def withdraw(db: Session, user: User, amount: int, destination: str, pin: str,
                                 TransactionStatus.CREATED.value,
                                 TransactionStatus.PROCESSING.value)
 
-    balance = wallet_service.apply_ledger(db, wallet, "DEBIT", amount, txn.id, txn.description)
+    balance = wallet_service.apply_ledger(db, wallet, "DEBIT", amount + fee, txn.id,
+                                          txn.description)
     txn.status = TransactionStatus.SUCCESS.value
     txn.completed_at = _now()
     txn.provider_reference = "wd_" + uuid.uuid4().hex[:12]
