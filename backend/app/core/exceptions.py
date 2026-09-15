@@ -41,6 +41,11 @@ class ValidationError(AppError):
     code = "VALIDATION_ERROR"
 
 
+class RateLimitError(AppError):
+    status_code = status.HTTP_429_TOO_MANY_REQUESTS
+    code = "RATE_LIMITED"
+
+
 def _error_body(code: str, message: str, request: Request, details: dict | None = None):
     return {
         "success": False,

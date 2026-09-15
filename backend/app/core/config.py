@@ -52,6 +52,17 @@ class Settings(BaseSettings):
 
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 
+    # --- Rate limiting (Redis-backed; fails open if Redis is unavailable) ---
+    RATE_LIMIT_ENABLED: bool = True
+    RL_OTP_INITIATE_LIMIT: int = 6
+    RL_OTP_INITIATE_WINDOW: int = 600
+    RL_LOGIN_LIMIT: int = 10
+    RL_LOGIN_WINDOW: int = 300
+    RL_PASSWORD_RESET_LIMIT: int = 5
+    RL_PASSWORD_RESET_WINDOW: int = 600
+    RL_VERIFY_OTP_LIMIT: int = 12
+    RL_VERIFY_OTP_WINDOW: int = 600
+
     # --- Firebase Cloud Messaging (push) ---
     # Provide EITHER the full service-account JSON in FCM_SERVICE_ACCOUNT_JSON,
     # OR the three individual fields below, OR set GOOGLE_APPLICATION_CREDENTIALS

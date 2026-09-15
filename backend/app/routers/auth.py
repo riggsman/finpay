@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.exceptions import AuthError
+from app.core.ratelimit import check_rate_limit
 from app.core.security import create_access_token, decode_token
 from app.db.database import get_db
 from app.dependencies.auth import get_current_user
@@ -32,6 +33,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 @router.post("/register/initiate", response_model=RegisterInitiateResponse)
 def register_initiate(payload: RegisterInitiateRequest, db: Session = Depends(get_db)):
+    check_rate_limit("otp_initiate", payload.phone,
+                     settings.RL_OTP_INITIATE_LIMIT, settings.RL_OTP_INITIATE_WINDOW)
     otp, _account_exists = auth_service.initiate_registration(db, payload.phone)
     db.commit()
     return RegisterInitiateResponse(
@@ -52,6 +55,8 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
 
 @router.post("/verify-otp", response_model=TokenResponse)
 def verify_otp(payload: VerifyOtpRequest, db: Session = Depends(get_db)):
+    check_rate_limit("verify_otp", payload.phone,
+                     settings.RL_VERIFY_OTP_LIMIT, settings.RL_VERIFY_OTP_WINDOW)
     user = auth_service.verify_otp(db, payload.phone, payload.otp)
     # Auto-login on successful verification for a smooth onboarding flow.
     access, refresh = _issue_tokens(db, user)
@@ -77,6 +82,8 @@ def _issue_tokens(db: Session, user):
 
 @router.post("/password-reset/request", response_model=PasswordResetRequestResponse)
 def password_reset_request(payload: PasswordResetRequest, db: Session = Depends(get_db)):
+    check_rate_limit("password_reset", payload.identifier,
+                     settings.RL_PASSWORD_RESET_LIMIT, settings.RL_PASSWORD_RESET_WINDOW)
     entry = password_reset_service.request_reset(db, payload.identifier)
     db.commit()
     # Respond generically to avoid account enumeration; expose the code only in dev.
@@ -105,6 +112,8 @@ def password_reset_complete(payload: PasswordResetCompleteRequest, db: Session =
 
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
+    check_rate_limit("login", payload.identifier,
+                     settings.RL_LOGIN_LIMIT, settings.RL_LOGIN_WINDOW)
     try:
         user, access, refresh = auth_service.login(db, payload.identifier, payload.password)
     except AuthError as exc:
