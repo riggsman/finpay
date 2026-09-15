@@ -40,6 +40,52 @@ def get_transaction(
     return TransactionPublic.model_validate(txn)
 
 
+@router.get("/{transaction_id}/receipt")
+def get_receipt(
+    transaction_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    txn = db.get(Transaction, transaction_id)
+    if not txn or txn.user_id != current_user.id:
+        raise NotFoundError("Transaction not found.", code="TRANSACTION_NOT_FOUND")
+    if txn.status != "SUCCESS":
+        raise NotFoundError("Receipt is only available for successful transactions.",
+                            code="RECEIPT_UNAVAILABLE")
+
+    from app.models.billing import BillPayment
+
+    bill = (
+        db.query(BillPayment)
+        .filter(BillPayment.transaction_id == txn.id)
+        .one_or_none()
+    )
+    receipt = {
+        "receipt_number": f"RCP-{txn.reference.upper()}",
+        "transaction_id": txn.id,
+        "reference": txn.reference,
+        "type": txn.type,
+        "amount": txn.amount,
+        "fee": txn.fee,
+        "total": txn.total,
+        "currency": txn.currency,
+        "status": txn.status,
+        "provider_reference": txn.provider_reference,
+        "created_at": txn.created_at,
+        "completed_at": txn.completed_at,
+    }
+    if bill:
+        receipt.update(
+            {
+                "provider": bill.provider_id,
+                "meter_number": bill.meter_number,
+                "customer": bill.customer_name,
+                "service": bill.category,
+            }
+        )
+    return receipt
+
+
 @router.get("/{transaction_id}/events", response_model=list[TransactionEventPublic])
 def get_transaction_events(
     transaction_id: int,

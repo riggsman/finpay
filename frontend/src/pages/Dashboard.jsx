@@ -133,6 +133,7 @@ export default function Dashboard() {
           <span className="bell pill">
             🔔 {unread > 0 && <span className="count">{unread}</span>}
           </span>
+          <button className="btn-accent" onClick={() => navigate("/services")}>Pay bills</button>
           <button className="btn-ghost" onClick={signOut}>Sign out</button>
         </div>
       </div>

@@ -13,6 +13,7 @@ import app.models.token  # noqa: F401
 import app.models.wallet  # noqa: F401
 import app.models.transaction  # noqa: F401
 import app.models.notification  # noqa: F401
+import app.models.billing  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)

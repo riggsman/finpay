@@ -13,4 +13,5 @@ from app.models import (  # noqa: E402,F401
     wallet,
     transaction,
     notification,
+    billing,
 )

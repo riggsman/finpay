@@ -112,6 +112,11 @@ def verify_otp(db: Session, phone: str, code: str) -> User:
     user.status = UserStatus.ACTIVE
     user.phone_verified = True
 
+    # Provision a default transaction PIN on activation (dev convenience).
+    # In production this is set by the user during onboarding / security setup.
+    if not user.transaction_pin_hash:
+        user.transaction_pin_hash = hash_password(settings.DEFAULT_TRANSACTION_PIN)
+
     # Provision a wallet on activation (idempotent).
     wallet = db.query(Wallet).filter(Wallet.user_id == user.id).one_or_none()
     if not wallet:

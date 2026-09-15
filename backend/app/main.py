@@ -11,6 +11,7 @@ from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
 from app.routers import (
     auth,
+    bill_payments,
     dashboard,
     notifications,
     services,
@@ -67,6 +68,7 @@ app.include_router(transactions.router, prefix=api)
 app.include_router(dashboard.router, prefix=api)
 app.include_router(notifications.router, prefix=api)
 app.include_router(services.router, prefix=api)
+app.include_router(bill_payments.router, prefix=api)
 
 # Wrap the FastAPI app with the Socket.IO ASGI app so both share one server.
 asgi = socketio.ASGIApp(sio, other_asgi_app=app, socketio_path="socket.io")

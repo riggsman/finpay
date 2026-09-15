@@ -30,9 +30,9 @@ def get_wallet(db: Session, user_id: int) -> Wallet:
     return wallet
 
 
-def _record_event(db: Session, txn: Transaction, event_type: str,
-                  previous: str | None, new: str | None,
-                  payload: dict | None = None) -> None:
+def record_event(db: Session, txn: Transaction, event_type: str,
+                 previous: str | None, new: str | None,
+                 payload: dict | None = None) -> None:
     db.add(
         TransactionEvent(
             transaction_id=txn.id,
@@ -42,6 +42,10 @@ def _record_event(db: Session, txn: Transaction, event_type: str,
             payload=json.dumps(payload) if payload else None,
         )
     )
+
+
+# Backwards-compatible private alias.
+_record_event = record_event
 
 
 def add_money(db: Session, user_id: int, amount: int, funding_method: str,

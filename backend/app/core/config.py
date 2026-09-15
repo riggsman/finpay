@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     OTP_MAX_ATTEMPTS: int = 5
     EXPOSE_OTP_IN_RESPONSE: bool = True
 
+    # Default transaction PIN assigned at activation (development convenience).
+    DEFAULT_TRANSACTION_PIN: str = "1234"
+    # Validation token lifetime for bill payments (seconds).
+    VALIDATION_TOKEN_TTL_SECONDS: int = 300
+    # Simulated provider processing delay (seconds) for the electricity flow.
+    PROVIDER_PROCESSING_DELAY_SECONDS: float = 2.0
+
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     @property

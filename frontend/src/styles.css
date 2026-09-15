@@ -197,3 +197,45 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
 .empty { color: var(--muted); font-size: 14px; padding: 18px 0; text-align: center; }
 .spacer { height: 10px; }
 .link { color: var(--primary-2); cursor: pointer; }
+
+/* Services */
+.services-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 16px;
+  max-width: 700px;
+}
+.service-tile {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 26px 16px; border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--card), var(--card-2));
+  border: 1px solid var(--border); color: var(--text); min-height: 130px;
+}
+.service-tile:hover:not(.disabled) { border-color: var(--primary); filter: brightness(1.06); }
+.service-tile.disabled { opacity: 0.5; }
+.service-icon { font-size: 34px; }
+.service-name { font-weight: 700; }
+.soon { font-size: 11px; color: var(--muted); }
+
+.provider-row {
+  width: 100%; display: flex; justify-content: space-between; align-items: center;
+  margin-top: 10px;
+}
+
+.review-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.review-row.total { border-bottom: none; font-weight: 800; font-size: 18px; padding-top: 14px; }
+.receipt { background: var(--bg-soft); border: 1px solid var(--border); border-radius: 12px; padding: 6px 16px; text-align: left; }
+
+.spinner {
+  width: 46px; height: 46px; border-radius: 50%;
+  border: 4px solid var(--border); border-top-color: var(--primary);
+  margin: 0 auto; animation: spin 0.9s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.result-icon {
+  width: 64px; height: 64px; border-radius: 50%; margin: 0 auto;
+  display: grid; place-items: center; font-size: 34px; font-weight: 800;
+}
+.result-icon.success { background: rgba(52,211,153,0.16); color: var(--accent); }
+.result-icon.failed { background: rgba(248,113,113,0.16); color: var(--danger); }

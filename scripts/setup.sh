@@ -55,7 +55,11 @@ fi
 # shellcheck disable=SC1091
 . .venv/bin/activate
 pip install --upgrade pip -q
-pip install -q -r requirements.txt
+if [ -f requirements-dev.txt ]; then
+  pip install -q -r requirements-dev.txt
+else
+  pip install -q -r requirements.txt
+fi
 if [ ! -f .env ]; then
   cp .env.example .env
 fi

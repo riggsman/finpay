@@ -3,6 +3,8 @@ import Landing from "./pages/Landing";
 import Register from "./pages/Register";
 import Login from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
+import Services from "./pages/Services";
+import Electricity from "./pages/Electricity";
 import ProtectedRoute from "./routes/ProtectedRoute";
 
 export default function App() {
@@ -16,6 +18,22 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/services"
+        element={
+          <ProtectedRoute>
+            <Services />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/services/electricity"
+        element={
+          <ProtectedRoute>
+            <Electricity />
           </ProtectedRoute>
         }
       />
