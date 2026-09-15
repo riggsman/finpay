@@ -11,6 +11,8 @@ function formatMoney(minor, currency) {
   })}`;
 }
 
+const CREDIT_TYPES = new Set(["ADD_MONEY", "TRANSFER_RECEIVED"]);
+
 const CONN_LABEL = {
   CONNECTED: { cls: "live", text: "Live" },
   CONNECTING: { cls: "reconnecting", text: "Connecting…" },
@@ -180,20 +182,23 @@ export default function Dashboard() {
           {transactions.length === 0 ? (
             <div className="empty">No transactions yet.</div>
           ) : (
-            transactions.map((t) => (
-              <div className="txn" key={t.id}>
-                <div className="meta">
-                  <span>{t.type.replace("_", " ")}</span>
-                  <span className="muted small">{t.reference}</span>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <div className="amt">
-                    +{formatMoney(t.amount, t.currency)} {t.currency}
+            transactions.map((t) => {
+              const isCredit = CREDIT_TYPES.has(t.type);
+              return (
+                <div className="txn" key={t.id}>
+                  <div className="meta">
+                    <span>{t.type.replaceAll("_", " ")}</span>
+                    <span className="muted small">{t.reference}</span>
                   </div>
-                  <span className={`badge ${t.status}`}>{t.status}</span>
+                  <div style={{ textAlign: "right" }}>
+                    <div className="amt" style={{ color: isCredit ? "var(--accent)" : "var(--text)" }}>
+                      {isCredit ? "+" : "−"}{formatMoney(t.amount, t.currency)} {t.currency}
+                    </div>
+                    <span className={`badge ${t.status}`}>{t.status}</span>
+                  </div>
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
 
