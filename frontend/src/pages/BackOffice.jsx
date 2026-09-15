@@ -49,7 +49,21 @@ export default function BackOffice() {
   const [overview, setOverview] = useState(null);
   const [drafts, setDrafts] = useState({});
   const [services, setServices] = useState([]);
+  const [providers, setProviders] = useState([]);
+  const [settingsRows, setSettingsRows] = useState([]);
+  const [settingsDraft, setSettingsDraft] = useState({});
+  const [newProvider, setNewProvider] = useState({ category: "electricity", provider_id: "", name: "" });
   const [msg, setMsg] = useState(null);
+
+  function loadProviders() {
+    adminApi.listProviders().then(setProviders).catch(() => {});
+  }
+  function loadSettings() {
+    adminApi.listSettings().then((rows) => {
+      setSettingsRows(rows);
+      setSettingsDraft(Object.fromEntries(rows.map((s) => [s.key, s.value])));
+    }).catch(() => {});
+  }
 
   useEffect(() => {
     if (!user?.is_admin) return;
@@ -60,6 +74,8 @@ export default function BackOffice() {
       setDrafts(d);
     }).catch(() => {});
     adminApi.listServices().then(setServices).catch(() => {});
+    loadProviders();
+    loadSettings();
   }, [user]);
 
   if (!user?.is_admin) {
@@ -89,6 +105,45 @@ export default function BackOffice() {
     adminApi.listServices().then(setServices).catch(() => {});
   }
 
+  async function toggleProvider(id, enabled) {
+    await adminApi.updateProvider(id, { enabled });
+    loadProviders();
+  }
+
+  async function addProvider(e) {
+    e.preventDefault();
+    setMsg(null);
+    try {
+      await adminApi.createProvider(newProvider.category, newProvider.provider_id, newProvider.name);
+      setNewProvider({ category: "electricity", provider_id: "", name: "" });
+      loadProviders();
+      setMsg("Provider added.");
+    } catch (err) {
+      setMsg(err.message);
+    }
+  }
+
+  async function saveSettings() {
+    setMsg(null);
+    try {
+      await adminApi.updateSettings(settingsDraft);
+      loadSettings();
+      setMsg("Settings saved.");
+    } catch (err) {
+      setMsg(err.message);
+    }
+  }
+
+  async function sendTestEmail() {
+    setMsg(null);
+    try {
+      const r = await adminApi.emailTest("FinPay Back Office test", "This is a test email.");
+      setMsg(r.sent ? `Test email sent to ${r.to} (${r.backend}).` : `Email not sent (backend: ${r.backend}).`);
+    } catch (err) {
+      setMsg(err.message);
+    }
+  }
+
   return (
     <div className="container">
       <div className="topbar">
@@ -100,6 +155,8 @@ export default function BackOffice() {
         <button className={`tab ${tab === "overview" ? "active" : ""}`} onClick={() => setTab("overview")}>Overview</button>
         <button className={`tab ${tab === "fees" ? "active" : ""}`} onClick={() => setTab("fees")}>Service fees</button>
         <button className={`tab ${tab === "services" ? "active" : ""}`} onClick={() => setTab("services")}>Features</button>
+        <button className={`tab ${tab === "providers" ? "active" : ""}`} onClick={() => setTab("providers")}>Providers</button>
+        <button className={`tab ${tab === "settings" ? "active" : ""}`} onClick={() => setTab("settings")}>Settings</button>
       </div>
 
       {msg && <div className="alert alert-info">{msg}</div>}
@@ -180,6 +237,72 @@ export default function BackOffice() {
               </label>
             </div>
           ))}
+        </div>
+      )}
+
+      {tab === "providers" && (
+        <div className="grid mt">
+          <div className="card">
+            <h2>Providers</h2>
+            {providers.map((p) => (
+              <div className="txn" key={p.id}>
+                <div className="meta">
+                  <span>{p.name}</span>
+                  <span className="muted small">{p.category} · {p.provider_id}</span>
+                </div>
+                <label className="switch">
+                  <input type="checkbox" checked={p.enabled} onChange={(e) => toggleProvider(p.id, e.target.checked)} style={{ width: "auto" }} />
+                  {p.enabled ? "Enabled" : "Disabled"}
+                </label>
+              </div>
+            ))}
+          </div>
+          <div className="card">
+            <h2>Add provider</h2>
+            <form onSubmit={addProvider}>
+              <label>Category</label>
+              <select value={newProvider.category} onChange={(e) => setNewProvider({ ...newProvider, category: e.target.value })}>
+                <option value="electricity">Electricity</option>
+                <option value="airtime">Airtime</option>
+                <option value="data">Data</option>
+              </select>
+              <label>Provider ID (slug)</label>
+              <input value={newProvider.provider_id} onChange={(e) => setNewProvider({ ...newProvider, provider_id: e.target.value })} placeholder="e.g. camtel" required />
+              <label>Display name</label>
+              <input value={newProvider.name} onChange={(e) => setNewProvider({ ...newProvider, name: e.target.value })} placeholder="e.g. CAMTEL" required />
+              <div className="mt"><button className="btn-primary">Add provider</button></div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {tab === "settings" && (
+        <div className="card mt" style={{ maxWidth: 640 }}>
+          <h2>Platform settings</h2>
+          {settingsRows.map((s) => (
+            <div key={s.key}>
+              <label>{s.label || s.key}</label>
+              {s.value_type === "bool" ? (
+                <label className="switch">
+                  <input type="checkbox" checked={String(settingsDraft[s.key]).toLowerCase() === "true"}
+                    onChange={(e) => setSettingsDraft({ ...settingsDraft, [s.key]: e.target.checked ? "true" : "false" })}
+                    style={{ width: "auto" }} />
+                  {String(settingsDraft[s.key]).toLowerCase() === "true" ? "On" : "Off"}
+                </label>
+              ) : (
+                <input
+                  type={s.value_type === "int" ? "number" : "text"}
+                  value={settingsDraft[s.key] ?? ""}
+                  onChange={(e) => setSettingsDraft({ ...settingsDraft, [s.key]: e.target.value })}
+                />
+              )}
+            </div>
+          ))}
+          <div className="row mt" style={{ maxWidth: 420 }}>
+            <button className="btn-primary" onClick={saveSettings}>Save settings</button>
+            <button className="btn-ghost" onClick={sendTestEmail}>Send test email</button>
+          </div>
+          <p className="muted small mt">Limit values are in minor units (÷100 for XAF).</p>
         </div>
       )}
     </div>
