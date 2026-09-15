@@ -17,6 +17,7 @@ from app.routers import (
     notifications,
     security,
     services,
+    social,
     support,
     transactions,
     users,
@@ -98,6 +99,7 @@ app.include_router(notifications.router, prefix=api)
 app.include_router(services.router, prefix=api)
 app.include_router(bill_payments.router, prefix=api)
 app.include_router(support.router, prefix=api)
+app.include_router(social.router, prefix=api)
 
 # Wrap the FastAPI app with the Socket.IO ASGI app so both share one server.
 asgi = socketio.ASGIApp(sio, other_asgi_app=app, socketio_path="socket.io")

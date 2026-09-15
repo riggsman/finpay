@@ -17,4 +17,5 @@ from app.models import (  # noqa: E402,F401
     password_reset,
     kyc,
     support,
+    social,
 )

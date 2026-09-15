@@ -13,6 +13,7 @@ import TransactionDetail from "./pages/TransactionDetail";
 import Kyc from "./pages/Kyc";
 import Support from "./pages/Support";
 import TicketDetail from "./pages/TicketDetail";
+import Requests from "./pages/Requests";
 import ProtectedRoute from "./routes/ProtectedRoute";
 
 export default function App() {
@@ -59,6 +60,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <WalletAction mode="withdraw" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/wallet/requests"
+        element={
+          <ProtectedRoute>
+            <Requests />
           </ProtectedRoute>
         }
       />

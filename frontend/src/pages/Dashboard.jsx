@@ -209,7 +209,8 @@ export default function Dashboard() {
               notification → Socket.IO. Balance updates live.
             </p>
             <div className="row mt">
-              <button className="btn-ghost" onClick={() => navigate("/wallet/send")}>↗ Send money</button>
+              <button className="btn-ghost" onClick={() => navigate("/wallet/send")}>↗ Send</button>
+              <button className="btn-ghost" onClick={() => navigate("/wallet/requests")}>⇦ Request</button>
               <button className="btn-ghost" onClick={() => navigate("/wallet/withdraw")}>↘ Withdraw</button>
             </div>
           </div>

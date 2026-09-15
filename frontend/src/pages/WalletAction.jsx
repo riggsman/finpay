@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { walletApi } from "../api/wallet";
+import { beneficiariesApi } from "../api/social";
 
 function money(minor) {
   return (minor / 100).toLocaleString(undefined, {
@@ -21,10 +22,25 @@ export default function WalletAction({ mode }) {
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [beneficiaries, setBeneficiaries] = useState([]);
+  const [savedMsg, setSavedMsg] = useState(null);
 
   useEffect(() => {
     walletApi.get().then(setWallet).catch(() => {});
-  }, []);
+    if (isSend) beneficiariesApi.list().then(setBeneficiaries).catch(() => {});
+  }, [isSend]);
+
+  async function saveBeneficiary() {
+    setSavedMsg(null);
+    try {
+      await beneficiariesApi.add(target);
+      const list = await beneficiariesApi.list();
+      setBeneficiaries(list);
+      setSavedMsg("Saved to beneficiaries.");
+    } catch (err) {
+      setSavedMsg(err.message);
+    }
+  }
 
   const amountMinor = Math.round(parseFloat(amount || "0") * 100);
 
@@ -61,6 +77,24 @@ export default function WalletAction({ mode }) {
               Balance: <strong style={{ color: "var(--text)" }}>{money(wallet.balance)} {wallet.currency}</strong>
             </p>
 
+            {isSend && beneficiaries.length > 0 && (
+              <>
+                <label>Beneficiaries</label>
+                <div className="chips">
+                  {beneficiaries.map((b) => (
+                    <button
+                      type="button"
+                      key={b.id}
+                      className={`chip ${target === b.phone ? "active" : ""}`}
+                      onClick={() => setTarget(b.phone)}
+                    >
+                      {b.display_name}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
+
             <label>{isSend ? "Recipient phone or email" : "Destination account"}</label>
             <input
               value={target}
@@ -68,6 +102,12 @@ export default function WalletAction({ mode }) {
               placeholder={isSend ? "+237650000002" : "Bank ****1234"}
               autoFocus
             />
+            {isSend && target && !beneficiaries.some((b) => b.phone === target) && (
+              <div className="mt small">
+                <span className="link" onClick={saveBeneficiary}>+ Save as beneficiary</span>
+                {savedMsg && <span className="muted"> — {savedMsg}</span>}
+              </div>
+            )}
 
             <label>Amount ({wallet.currency})</label>
             <input type="number" min="1" value={amount} onChange={(e) => setAmount(e.target.value)} />
