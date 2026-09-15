@@ -3,6 +3,7 @@ import { setAccessToken } from "../api/client";
 import { authApi } from "../api/auth";
 import { socketService } from "../services/socketService";
 import { registerDevice } from "../services/pushService";
+import { setConfig, clearConfig, refreshConfig } from "../services/feeConfig";
 
 const AuthContext = createContext(null);
 
@@ -25,10 +26,14 @@ export function AuthProvider({ children }) {
       socketService.connect(auth.access_token);
       // Register this device for push (best-effort; no-op without FCM config).
       registerDevice();
+      // Cache fee/feature config (from login response, else fetch).
+      if (auth.config) setConfig(auth.config);
+      else refreshConfig();
     } else {
       setAccessToken(null);
       localStorage.removeItem(STORAGE_KEY);
       socketService.disconnect();
+      clearConfig();
     }
     return () => {};
   }, [auth]);

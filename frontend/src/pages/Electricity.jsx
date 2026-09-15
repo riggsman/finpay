@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { billPaymentsApi, transactionApi } from "../api/billPayments";
 import { walletApi } from "../api/wallet";
 import { socketService } from "../services/socketService";
+import { computeFee } from "../services/feeConfig";
 
 function money(minor) {
   return (minor / 100).toLocaleString(undefined, {
@@ -193,8 +194,8 @@ export default function Electricity() {
             <div className="review-row"><span className="muted">Meter number</span><span>{validation.customer.meter_number}</span></div>
             <div className="review-row"><span className="muted">Customer</span><span>{validation.customer.name}</span></div>
             <div className="review-row"><span className="muted">Amount</span><span>{money(amountMinor)} {wallet.currency}</span></div>
-            <div className="review-row"><span className="muted">Fee</span><span>0.00 {wallet.currency}</span></div>
-            <div className="review-row total"><span>Total</span><span>{money(amountMinor)} {wallet.currency}</span></div>
+            <div className="review-row"><span className="muted">Service fee</span><span>{money(computeFee("ELECTRICITY", amountMinor))} {wallet.currency}</span></div>
+            <div className="review-row total"><span>Total</span><span>{money(amountMinor + computeFee("ELECTRICITY", amountMinor))} {wallet.currency}</span></div>
             {error && <div className="alert alert-error">{error}</div>}
             <div className="mt-lg">
               <button className="btn-primary" onClick={() => setStep("pin")}>Confirm & pay</button>

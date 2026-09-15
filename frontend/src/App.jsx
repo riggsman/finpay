@@ -15,6 +15,7 @@ import Kyc from "./pages/Kyc";
 import Support from "./pages/Support";
 import TicketDetail from "./pages/TicketDetail";
 import Requests from "./pages/Requests";
+import BackOffice from "./pages/BackOffice";
 import ProtectedRoute from "./routes/ProtectedRoute";
 
 export default function App() {
@@ -133,6 +134,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <TicketDetail />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin"
+        element={
+          <ProtectedRoute>
+            <BackOffice />
           </ProtectedRoute>
         }
       />

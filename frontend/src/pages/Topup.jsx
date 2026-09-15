@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { billPaymentsApi } from "../api/billPayments";
 import { walletApi } from "../api/wallet";
+import { computeFee } from "../services/feeConfig";
 
 function money(minor) {
   return (minor / 100).toLocaleString(undefined, {
@@ -34,6 +35,7 @@ export default function Topup({ category }) {
   }, [category]);
 
   const amountMinor = Math.round(parseFloat(amount || "0") * 100);
+  const fee = computeFee(category.toUpperCase(), amountMinor);
 
   async function submit(e) {
     e.preventDefault();
@@ -73,6 +75,13 @@ export default function Topup({ category }) {
             <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder="+237650000000" required />
             <label>Amount ({wallet.currency})</label>
             <input type="number" min="1" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            {amountMinor > 0 && (
+              <div className="fee-box">
+                <div className="review-row"><span className="muted">Amount</span><span>{money(amountMinor)} {wallet.currency}</span></div>
+                <div className="review-row"><span className="muted">Service fee</span><span>{money(fee)} {wallet.currency}</span></div>
+                <div className="review-row total"><span>Total</span><span>{money(amountMinor + fee)} {wallet.currency}</span></div>
+              </div>
+            )}
             <label>Transaction PIN <span className="muted small">(dev: 1234)</span></label>
             <input type="password" value={pin} onChange={(e) => setPin(e.target.value)} inputMode="numeric" maxLength={6} />
             {error && <div className="alert alert-error">{error}</div>}

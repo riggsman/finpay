@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { walletApi } from "../api/wallet";
 import { beneficiariesApi } from "../api/social";
+import { computeFee } from "../services/feeConfig";
 
 function money(minor) {
   return (minor / 100).toLocaleString(undefined, {
@@ -43,6 +44,9 @@ export default function WalletAction({ mode }) {
   }
 
   const amountMinor = Math.round(parseFloat(amount || "0") * 100);
+  const operation = isSend ? "SEND_MONEY" : "WITHDRAW";
+  const fee = computeFee(operation, amountMinor);
+  const totalMinor = amountMinor + fee;
 
   async function submit(e) {
     e.preventDefault();
@@ -111,6 +115,14 @@ export default function WalletAction({ mode }) {
 
             <label>Amount ({wallet.currency})</label>
             <input type="number" min="1" value={amount} onChange={(e) => setAmount(e.target.value)} />
+
+            {amountMinor > 0 && (
+              <div className="fee-box">
+                <div className="review-row"><span className="muted">Amount</span><span>{money(amountMinor)} {wallet.currency}</span></div>
+                <div className="review-row"><span className="muted">Service fee</span><span>{money(fee)} {wallet.currency}</span></div>
+                <div className="review-row total"><span>Total</span><span>{money(totalMinor)} {wallet.currency}</span></div>
+              </div>
+            )}
 
             <label>Transaction PIN <span className="muted small">(dev: 1234)</span></label>
             <input
