@@ -117,6 +117,14 @@ def verify_otp(db: Session, phone: str, code: str) -> User:
     if not user.transaction_pin_hash:
         user.transaction_pin_hash = hash_password(settings.DEFAULT_TRANSACTION_PIN)
 
+    # Apply Back Office-configured default transaction limits.
+    from app.services import catalog_service
+
+    user.per_txn_limit = catalog_service.get_int(
+        db, "default_per_txn_limit", settings.DEFAULT_PER_TXN_LIMIT)
+    user.daily_limit = catalog_service.get_int(
+        db, "default_daily_limit", settings.DEFAULT_DAILY_LIMIT)
+
     # Provision a wallet on activation (idempotent).
     wallet = db.query(Wallet).filter(Wallet.user_id == user.id).one_or_none()
     if not wallet:

@@ -21,8 +21,9 @@ router = APIRouter(prefix="/bill-payments", tags=["bill-payments"])
 def list_providers(
     category: str = Query(...),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    return {"providers": billing_service.list_providers(category)}
+    return {"providers": billing_service.list_providers(db, category)}
 
 
 @router.post("/electricity/validate", response_model=MeterValidateResponse)
@@ -34,11 +35,11 @@ def validate_meter(
     validation = billing_service.validate_meter(
         db, current_user, payload.provider_id, payload.meter_number
     )
-    provider = billing_service.ELECTRICITY_PROVIDERS[validation.provider_id]
+    pname = billing_service.provider_name(db, "electricity", validation.provider_id)
     return MeterValidateResponse(
         validation_token=validation.token,
         customer={"name": validation.customer_name, "meter_number": validation.meter_number},
-        provider={"id": provider["id"], "name": provider["name"]},
+        provider={"id": validation.provider_id, "name": pname},
         expires_in=settings.VALIDATION_TOKEN_TTL_SECONDS,
     )
 
@@ -47,8 +48,9 @@ def validate_meter(
 def list_topup_providers(
     category: str = Query(...),
     current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
-    return {"providers": billing_service.list_topup_providers(category)}
+    return {"providers": billing_service.list_topup_providers(db, category)}
 
 
 @router.post("/topup/confirm", response_model=TransactionPublic)

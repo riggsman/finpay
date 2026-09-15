@@ -17,16 +17,17 @@ from app.models.transaction import (
 )
 from app.models.user import User
 from app.models.wallet import LedgerEntry
-from app.services import audit_service, fee_service, security_service, wallet_service
+from app.services import (
+    audit_service,
+    catalog_service,
+    fee_service,
+    security_service,
+    wallet_service,
+)
 from app.services.notification_service import create_notification, deliver_notification
 from app.websocket.socket import emit_to_transaction, emit_to_user
 
 logger = get_logger("finpay.billing")
-
-# Static provider catalog for the MVP (backed by service_providers in later work).
-ELECTRICITY_PROVIDERS = {
-    "eneo": {"id": "eneo", "name": "ENEO", "category": "electricity"},
-}
 
 _DEMO_NAMES = [
     "JOHN DOE", "GRACE HOPPER", "ADA LOVELACE", "ALAN TURING",
@@ -38,27 +39,28 @@ def _now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
 
 
-def list_providers(category: str) -> list[dict]:
+def _provider_list(db: Session, category: str, enabled_only: bool = True) -> list[dict]:
+    return [
+        {"id": p.provider_id, "name": p.name, "category": p.category}
+        for p in catalog_service.list_providers(db, category, enabled_only=enabled_only)
+    ]
+
+
+def provider_name(db: Session, category: str, provider_id: str) -> str:
+    p = catalog_service.get_provider(db, category, provider_id)
+    return p.name if p else provider_id
+
+
+def list_providers(db: Session, category: str) -> list[dict]:
     if category != "electricity":
         return []
-    return list(ELECTRICITY_PROVIDERS.values())
+    return _provider_list(db, "electricity")
 
 
-# Airtime / data top-up providers (no meter validation required).
-TOPUP_PROVIDERS = {
-    "airtime": [
-        {"id": "mtn", "name": "MTN", "category": "airtime"},
-        {"id": "orange", "name": "Orange", "category": "airtime"},
-    ],
-    "data": [
-        {"id": "mtn", "name": "MTN Data", "category": "data"},
-        {"id": "orange", "name": "Orange Data", "category": "data"},
-    ],
-}
-
-
-def list_topup_providers(category: str) -> list[dict]:
-    return TOPUP_PROVIDERS.get(category, [])
+def list_topup_providers(db: Session, category: str) -> list[dict]:
+    if category not in ("airtime", "data"):
+        return []
+    return _provider_list(db, category)
 
 
 def confirm_topup(db: Session, user: User, category: str, provider_id: str,
@@ -67,9 +69,10 @@ def confirm_topup(db: Session, user: User, category: str, provider_id: str,
     """Synchronous airtime/data top-up. Reuses the transaction engine
     (PIN, limits, idempotency, ledger, realtime). Targets ending in 0000 model
     a provider decline (no debit)."""
-    if category not in TOPUP_PROVIDERS:
+    if category not in ("airtime", "data"):
         raise ValidationError("Unknown top-up category.", code="UNKNOWN_CATEGORY")
-    if not any(p["id"] == provider_id for p in TOPUP_PROVIDERS[category]):
+    provider = catalog_service.get_provider(db, category, provider_id)
+    if not provider or not provider.enabled:
         raise ValidationError("Unknown provider.", code="UNKNOWN_PROVIDER")
     if amount <= 0:
         raise ValidationError("Amount must be positive.", code="INVALID_AMOUNT")
@@ -95,7 +98,7 @@ def confirm_topup(db: Session, user: User, category: str, provider_id: str,
         raise ValidationError("Insufficient wallet balance.", code="INSUFFICIENT_BALANCE")
     security_service.check_limits(db, user, amount)
 
-    provider_name = next(p["name"] for p in TOPUP_PROVIDERS[category] if p["id"] == provider_id)
+    pname = provider.name
     txn = Transaction(
         reference="txn_" + uuid.uuid4().hex[:16],
         user_id=user.id,
@@ -104,7 +107,7 @@ def confirm_topup(db: Session, user: User, category: str, provider_id: str,
         amount=amount,
         fee=fee,
         currency=wallet.currency,
-        description=f"{provider_name} {category} for {target}",
+        description=f"{pname} {category} for {target}",
     )
     db.add(txn)
     db.flush()
@@ -165,7 +168,8 @@ def _mock_customer_name(meter_number: str) -> str:
 
 def validate_meter(db: Session, user: User, provider_id: str,
                    meter_number: str) -> ElectricityValidation:
-    if provider_id not in ELECTRICITY_PROVIDERS:
+    provider = catalog_service.get_provider(db, "electricity", provider_id)
+    if not provider or not provider.enabled:
         raise ValidationError("Unknown electricity provider.", code="UNKNOWN_PROVIDER")
     normalized = meter_number.strip()
     if len(normalized) < 6 or not normalized.isdigit():
@@ -242,7 +246,7 @@ def confirm_electricity(db: Session, user: User, validation_token: str, amount: 
         amount=amount,
         fee=fee,
         currency=wallet.currency,
-        description=f"Electricity • {ELECTRICITY_PROVIDERS[validation.provider_id]['name']} • {validation.meter_number}",
+        description=f"Electricity • {provider_name(db, 'electricity', validation.provider_id)} • {validation.meter_number}",
     )
     db.add(txn)
     db.flush()

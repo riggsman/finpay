@@ -6,7 +6,7 @@ from app.core.logging import get_logger
 from app.core.security import hash_password
 from app.models.user import User, UserStatus
 from app.models.wallet import Wallet
-from app.services import fee_service
+from app.services import catalog_service, fee_service
 
 logger = get_logger("finpay.bootstrap")
 
@@ -49,4 +49,6 @@ def seed_admin(db: Session) -> None:
 
 def seed_all(db: Session) -> None:
     fee_service.seed_defaults(db)
+    catalog_service.seed_providers(db)
+    catalog_service.seed_settings(db)
     seed_admin(db)

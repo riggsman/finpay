@@ -29,17 +29,29 @@ def _reset_fees_and_services():
     import json
 
     from app.db.database import SessionLocal
+    from app.models.catalog import AppSetting, ServiceProvider
     from app.models.fees import FeeRule, ServiceFlag
-    from app.services import fee_service
+    from app.services import catalog_service, fee_service
 
     db = SessionLocal()
     try:
         fee_service.seed_defaults(db)
+        # Rebuild providers from defaults so provider tests are isolated.
+        db.query(ServiceProvider).delete()
+        db.commit()
+        catalog_service.seed_providers(db)
+        catalog_service.seed_settings(db)
         db.query(FeeRule).update(
             {FeeRule.fee_type: "FLAT", FeeRule.config: json.dumps({"fee": 0}),
              FeeRule.active: True}
         )
         db.query(ServiceFlag).update({ServiceFlag.enabled: True})
+        db.query(ServiceProvider).update({ServiceProvider.enabled: True})
+        # Reset editable settings to their seeded defaults.
+        defaults = {k: v for k, v, _t, _l in catalog_service.DEFAULT_SETTINGS}
+        for s in db.query(AppSetting).all():
+            if s.key in defaults:
+                s.value = defaults[s.key]
         db.commit()
     finally:
         db.close()

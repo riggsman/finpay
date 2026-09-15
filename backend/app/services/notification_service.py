@@ -64,7 +64,8 @@ def deliver_notification(notification: Notification) -> None:
         },
         event_id=notification.event_id,
     )
-    # Complementary background push (no-op when FCM is not configured).
-    from app.notifications import fcm
+    # Complementary background channels (each no-ops when not configured/eligible).
+    from app.notifications import email, fcm
 
     fcm.maybe_send(notification)
+    email.maybe_send(notification)

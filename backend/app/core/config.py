@@ -85,6 +85,16 @@ class Settings(BaseSettings):
     # user is connected. Otherwise FCM is only used when the user is offline.
     FCM_ALWAYS_PRIORITIES: str = "CRITICAL"
 
+    # --- Email notifications ---
+    # EMAIL_BACKEND: "console" (logs emails, default), "smtp", or "disabled".
+    EMAIL_BACKEND: str = "console"
+    SMTP_HOST: str = ""
+    SMTP_PORT: int = 587
+    SMTP_USERNAME: str = ""
+    SMTP_PASSWORD: str = ""
+    SMTP_USE_TLS: bool = True
+    EMAIL_FROM: str = "no-reply@finpay.app"
+
     @property
     def cors_origins_list(self) -> list[str]:
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
