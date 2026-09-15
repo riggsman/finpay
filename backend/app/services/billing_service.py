@@ -44,6 +44,117 @@ def list_providers(category: str) -> list[dict]:
     return list(ELECTRICITY_PROVIDERS.values())
 
 
+# Airtime / data top-up providers (no meter validation required).
+TOPUP_PROVIDERS = {
+    "airtime": [
+        {"id": "mtn", "name": "MTN", "category": "airtime"},
+        {"id": "orange", "name": "Orange", "category": "airtime"},
+    ],
+    "data": [
+        {"id": "mtn", "name": "MTN Data", "category": "data"},
+        {"id": "orange", "name": "Orange Data", "category": "data"},
+    ],
+}
+
+
+def list_topup_providers(category: str) -> list[dict]:
+    return TOPUP_PROVIDERS.get(category, [])
+
+
+def confirm_topup(db: Session, user: User, category: str, provider_id: str,
+                  target: str, amount: int, pin: str,
+                  idempotency_key: str | None) -> Transaction:
+    """Synchronous airtime/data top-up. Reuses the transaction engine
+    (PIN, limits, idempotency, ledger, realtime). Targets ending in 0000 model
+    a provider decline (no debit)."""
+    if category not in TOPUP_PROVIDERS:
+        raise ValidationError("Unknown top-up category.", code="UNKNOWN_CATEGORY")
+    if not any(p["id"] == provider_id for p in TOPUP_PROVIDERS[category]):
+        raise ValidationError("Unknown provider.", code="UNKNOWN_PROVIDER")
+    if amount <= 0:
+        raise ValidationError("Amount must be positive.", code="INVALID_AMOUNT")
+    if not user.transaction_pin_hash or not verify_password(pin, user.transaction_pin_hash):
+        raise AuthError("Incorrect transaction PIN.", code="INVALID_PIN")
+
+    if idempotency_key:
+        prior = (
+            db.query(IdempotencyKey)
+            .filter(IdempotencyKey.key == idempotency_key,
+                    IdempotencyKey.user_id == user.id)
+            .one_or_none()
+        )
+        if prior and prior.transaction_id:
+            existing = db.get(Transaction, prior.transaction_id)
+            if existing:
+                return existing
+
+    wallet = wallet_service.get_wallet(db, user.id)
+    if wallet.balance < amount:
+        raise ValidationError("Insufficient wallet balance.", code="INSUFFICIENT_BALANCE")
+    security_service.check_limits(db, user, amount)
+
+    provider_name = next(p["name"] for p in TOPUP_PROVIDERS[category] if p["id"] == provider_id)
+    txn = Transaction(
+        reference="txn_" + uuid.uuid4().hex[:16],
+        user_id=user.id,
+        type=category.upper(),
+        status=TransactionStatus.CREATED.value,
+        amount=amount,
+        fee=0,
+        currency=wallet.currency,
+        description=f"{provider_name} {category} for {target}",
+    )
+    db.add(txn)
+    db.flush()
+    if idempotency_key:
+        db.add(IdempotencyKey(key=idempotency_key, user_id=user.id, transaction_id=txn.id))
+    db.add(
+        BillPayment(transaction_id=txn.id, user_id=user.id, category=category,
+                    provider_id=provider_id, meter_number=target,
+                    customer_name=target, amount=amount)
+    )
+    audit_service.record(db, "TRANSACTION_CREATED", user_id=user.id,
+                         entity_type="transaction", entity_id=txn.id,
+                         meta={"type": txn.type, "amount": amount})
+    wallet_service.record_event(db, txn, "TRANSACTION_CREATED", None,
+                                TransactionStatus.CREATED.value)
+    txn.status = TransactionStatus.PROCESSING.value
+    wallet_service.record_event(db, txn, "TRANSACTION_PROCESSING",
+                                TransactionStatus.CREATED.value,
+                                TransactionStatus.PROCESSING.value)
+
+    # Simulated provider decline for targets ending 0000.
+    if target.endswith("0000"):
+        _fail(db, txn, user.id, "PROVIDER_DECLINED",
+              "The provider declined the top-up.")
+        return txn
+
+    txn.provider_reference = "prov_" + uuid.uuid4().hex[:12]
+    balance = wallet_service.apply_ledger(db, wallet, "DEBIT", amount, txn.id, txn.description)
+    txn.status = TransactionStatus.SUCCESS.value
+    txn.completed_at = _now()
+    wallet_service.record_event(db, txn, "TRANSACTION_SUCCESS",
+                                TransactionStatus.PROCESSING.value,
+                                TransactionStatus.SUCCESS.value,
+                                {"balance_after": balance})
+    notif = create_notification(
+        db, user_id=user.id, type="BILL_PAYMENT_SUCCESS", title="Top-up Successful",
+        message=f"Your {category} top-up of {amount / 100:,.2f} {wallet.currency} was successful.",
+        priority="HIGH", data={"transaction_id": txn.id, "amount": amount},
+    )
+    db.commit()
+    db.refresh(txn)
+    db.refresh(wallet)
+    emit_to_user(user.id, "TRANSACTION_SUCCESS", {
+        "transaction_id": txn.id, "reference": txn.reference, "status": txn.status,
+        "amount": amount, "currency": wallet.currency,
+    })
+    emit_to_user(user.id, "WALLET_BALANCE_UPDATED",
+                 {"balance": balance, "currency": wallet.currency})
+    deliver_notification(notif)
+    return txn
+
+
 def _mock_customer_name(meter_number: str) -> str:
     digits = "".join(ch for ch in meter_number if ch.isdigit()) or "0"
     return _DEMO_NAMES[int(digits[-2:] or "0") % len(_DEMO_NAMES)]

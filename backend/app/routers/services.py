@@ -9,8 +9,8 @@ router = APIRouter(tags=["services"])
 # service_categories / service_providers tables.
 _SERVICES = [
     {"id": "electricity", "name": "Electricity", "enabled": True},
-    {"id": "airtime", "name": "Airtime", "enabled": False},
-    {"id": "data", "name": "Data Bundles", "enabled": False},
+    {"id": "airtime", "name": "Airtime", "enabled": True},
+    {"id": "data", "name": "Data Bundles", "enabled": True},
     {"id": "water", "name": "Water", "enabled": False},
 ]
 

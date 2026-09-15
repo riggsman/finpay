@@ -38,7 +38,7 @@ export default function Services() {
             key={s.id}
             className={`service-tile ${s.enabled ? "" : "disabled"}`}
             disabled={!s.enabled}
-            onClick={() => s.id === "electricity" && navigate("/services/electricity")}
+            onClick={() => s.enabled && navigate(`/services/${s.id}`)}
           >
             <span className="service-icon">{ICONS[s.id] || "•"}</span>
             <span className="service-name">{s.name}</span>

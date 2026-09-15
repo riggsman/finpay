@@ -6,6 +6,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 import Dashboard from "./pages/Dashboard";
 import Services from "./pages/Services";
 import Electricity from "./pages/Electricity";
+import Topup from "./pages/Topup";
 import WalletAction from "./pages/WalletAction";
 import Security from "./pages/Security";
 import History from "./pages/History";
@@ -44,6 +45,22 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Electricity />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/services/airtime"
+        element={
+          <ProtectedRoute>
+            <Topup category="airtime" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/services/data"
+        element={
+          <ProtectedRoute>
+            <Topup category="data" />
           </ProtectedRoute>
         }
       />

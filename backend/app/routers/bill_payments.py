@@ -9,6 +9,7 @@ from app.schemas.billing import (
     ElectricityConfirmRequest,
     MeterValidateRequest,
     MeterValidateResponse,
+    TopupConfirmRequest,
 )
 from app.schemas.transaction import TransactionPublic
 from app.services import billing_service
@@ -40,6 +41,29 @@ def validate_meter(
         provider={"id": provider["id"], "name": provider["name"]},
         expires_in=settings.VALIDATION_TOKEN_TTL_SECONDS,
     )
+
+
+@router.get("/topup/providers")
+def list_topup_providers(
+    category: str = Query(...),
+    current_user: User = Depends(get_current_user),
+):
+    return {"providers": billing_service.list_topup_providers(category)}
+
+
+@router.post("/topup/confirm", response_model=TransactionPublic)
+def confirm_topup(
+    payload: TopupConfirmRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+):
+    key = payload.idempotency_key or idempotency_key
+    txn = billing_service.confirm_topup(
+        db, current_user, payload.category, payload.provider_id, payload.target,
+        payload.amount, payload.pin, key,
+    )
+    return TransactionPublic.model_validate(txn)
 
 
 @router.post("/electricity/confirm", response_model=TransactionPublic)
