@@ -14,4 +14,5 @@ from app.models import (  # noqa: E402,F401
     transaction,
     notification,
     billing,
+    password_reset,
 )

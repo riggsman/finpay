@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     OTP_MAX_ATTEMPTS: int = 5
     EXPOSE_OTP_IN_RESPONSE: bool = True
 
+    # Password reset lifetimes.
+    RESET_CODE_TTL_SECONDS: int = 300
+    RESET_TOKEN_TTL_SECONDS: int = 600
+
     # Default transaction PIN assigned at activation (development convenience).
     DEFAULT_TRANSACTION_PIN: str = "1234"
     # Validation token lifetime for bill payments (seconds).

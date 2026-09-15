@@ -6,6 +6,11 @@ from app.db.database import get_db
 from app.schemas.auth import (
     LoginRequest,
     MessageResponse,
+    PasswordResetCompleteRequest,
+    PasswordResetRequest,
+    PasswordResetRequestResponse,
+    PasswordResetVerifyRequest,
+    PasswordResetVerifyResponse,
     RegisterInitiateRequest,
     RegisterInitiateResponse,
     RegisterRequest,
@@ -13,7 +18,7 @@ from app.schemas.auth import (
     UserPublic,
     VerifyOtpRequest,
 )
-from app.services import auth_service
+from app.services import auth_service, password_reset_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -61,6 +66,34 @@ def _issue_tokens(db: Session, user):
     db.add(RefreshToken(user_id=user.id, jti=jti, expires_at=expires_at))
     db.flush()
     return access, refresh
+
+
+@router.post("/password-reset/request", response_model=PasswordResetRequestResponse)
+def password_reset_request(payload: PasswordResetRequest, db: Session = Depends(get_db)):
+    entry = password_reset_service.request_reset(db, payload.identifier)
+    db.commit()
+    # Respond generically to avoid account enumeration; expose the code only in dev.
+    return PasswordResetRequestResponse(
+        message="If an account exists, a reset code has been sent.",
+        expires_in=settings.RESET_CODE_TTL_SECONDS,
+        reset_code_debug=(entry.code if (entry and settings.EXPOSE_OTP_IN_RESPONSE) else None),
+    )
+
+
+@router.post("/password-reset/verify", response_model=PasswordResetVerifyResponse)
+def password_reset_verify(payload: PasswordResetVerifyRequest, db: Session = Depends(get_db)):
+    reset_token, expires_in = password_reset_service.verify_code(
+        db, payload.identifier, payload.code
+    )
+    db.commit()
+    return PasswordResetVerifyResponse(reset_token=reset_token, expires_in=expires_in)
+
+
+@router.post("/password-reset/complete", response_model=MessageResponse)
+def password_reset_complete(payload: PasswordResetCompleteRequest, db: Session = Depends(get_db)):
+    password_reset_service.complete_reset(db, payload.reset_token, payload.new_password)
+    db.commit()
+    return MessageResponse(message="Password updated. Please sign in with your new password.")
 
 
 @router.post("/login", response_model=TokenResponse)

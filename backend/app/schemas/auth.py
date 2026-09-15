@@ -55,3 +55,28 @@ class TokenResponse(BaseModel):
 
 class MessageResponse(BaseModel):
     message: str
+
+
+class PasswordResetRequest(BaseModel):
+    identifier: str
+
+
+class PasswordResetRequestResponse(BaseModel):
+    message: str
+    expires_in: int
+    reset_code_debug: str | None = None
+
+
+class PasswordResetVerifyRequest(BaseModel):
+    identifier: str
+    code: str = Field(min_length=4, max_length=12)
+
+
+class PasswordResetVerifyResponse(BaseModel):
+    reset_token: str
+    expires_in: int
+
+
+class PasswordResetCompleteRequest(BaseModel):
+    reset_token: str
+    new_password: str = Field(min_length=8, max_length=128)
