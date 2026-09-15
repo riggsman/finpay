@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     # Simulated provider processing delay (seconds) for the electricity flow.
     PROVIDER_PROCESSING_DELAY_SECONDS: float = 2.0
 
+    # Reconciliation worker: settles transactions left pending by provider timeouts.
+    RECONCILE_WORKER_ENABLED: bool = True
+    RECONCILE_INTERVAL_SECONDS: float = 5.0
+    RECONCILE_MIN_AGE_SECONDS: float = 3.0
+
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     @property

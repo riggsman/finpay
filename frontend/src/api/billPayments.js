@@ -19,4 +19,5 @@ export const billPaymentsApi = {
 export const transactionApi = {
   get: (id) => api.get(`/transactions/${id}`),
   receipt: (id) => api.get(`/transactions/${id}/receipt`),
+  reconcile: () => api.post("/transactions/reconcile"),
 };

@@ -15,6 +15,9 @@ def _fast_provider():
     # Speed up simulated async operations so completion tests are quick.
     settings.PROVIDER_PROCESSING_DELAY_SECONDS = 0.1
     settings.KYC_REVIEW_DELAY_SECONDS = 0.1
+    # Reconcile deterministically via the manual endpoint; no background worker.
+    settings.RECONCILE_WORKER_ENABLED = False
+    settings.RECONCILE_MIN_AGE_SECONDS = 0
     yield
 
 

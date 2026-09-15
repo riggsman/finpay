@@ -30,6 +30,10 @@ export const dashboardApi = {
   summary: () => api.get("/dashboard/summary"),
 };
 
+export const recoveryApi = {
+  reconcile: () => api.post("/transactions/reconcile"),
+};
+
 export const notificationsApi = {
   list: (limit = 20) => api.get(`/notifications?limit=${limit}`),
   unreadCount: () => api.get("/notifications/unread-count"),

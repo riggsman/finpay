@@ -1,7 +1,7 @@
 import datetime as dt
 import enum
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, String, Text
+from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
@@ -33,6 +33,12 @@ class Transaction(Base):
     description: Mapped[str | None] = mapped_column(String(255), nullable=True)
     provider_reference: Mapped[str | None] = mapped_column(String(64), nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Set when a provider response is unknown/timed out and the transaction must
+    # be settled by the reconciliation worker rather than marked failed.
+    pending_reconciliation: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False
+    )
+    reconcile_attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
     )

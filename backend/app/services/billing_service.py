@@ -153,6 +153,29 @@ def confirm_electricity(db: Session, user: User, validation_token: str, amount: 
     wallet_service.record_event(db, txn, "TRANSACTION_PENDING",
                                 TransactionStatus.CREATED.value,
                                 TransactionStatus.PENDING.value)
+
+    # Simulated provider timeout: meters ending in 5555 or 4444 return an unknown
+    # result. Per the SRS, we must NOT mark the transaction failed; leave it
+    # pending for the reconciliation worker to settle.
+    if validation.meter_number.endswith(("5555", "4444")):
+        txn.pending_reconciliation = True
+        wallet_service.record_event(db, txn, "PROVIDER_TIMEOUT",
+                                    TransactionStatus.PENDING.value,
+                                    TransactionStatus.PENDING.value)
+        notif = create_notification(
+            db, user_id=user.id, type="PAYMENT_PENDING", title="Payment Pending",
+            message="Your payment is still being processed. We'll update you shortly.",
+            priority="NORMAL", data={"transaction_id": txn.id},
+        )
+        db.commit()
+        db.refresh(txn)
+        emit_to_user(user.id, "TRANSACTION_PENDING", {
+            "transaction_id": txn.id, "reference": txn.reference,
+            "status": txn.status, "amount": txn.amount, "currency": txn.currency,
+        })
+        deliver_notification(notif)
+        return txn
+
     txn.status = TransactionStatus.PROCESSING.value
     wallet_service.record_event(db, txn, "TRANSACTION_PROCESSING",
                                 TransactionStatus.PENDING.value,

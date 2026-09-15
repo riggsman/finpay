@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { dashboardApi, notificationsApi, transactionsApi, walletApi } from "../api/wallet";
+import { dashboardApi, notificationsApi, recoveryApi, transactionsApi, walletApi } from "../api/wallet";
 import { kycApi } from "../api/kyc";
 import { socketService } from "../services/socketService";
 import { useAuth } from "../store/AuthContext";
@@ -51,7 +51,9 @@ export default function Dashboard() {
   }, []);
 
   useEffect(() => {
-    refresh().catch(() => {});
+    // Application-open recovery: settle any transactions left pending by a
+    // provider timeout, then refresh (SRS offline/recovery).
+    recoveryApi.reconcile().catch(() => {}).finally(() => refresh().catch(() => {}));
     kycApi.get().then((k) => setKycStatus(k.status)).catch(() => {});
   }, [refresh]);
 

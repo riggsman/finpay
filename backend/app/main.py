@@ -28,12 +28,35 @@ configure_logging()
 logger = get_logger("finpay.main")
 
 
+async def _reconciliation_worker():
+    """Periodically settle transactions left pending by provider timeouts."""
+    from app.services.reconciliation_service import run_reconciliation_cycle
+
+    while True:
+        try:
+            await asyncio.sleep(settings.RECONCILE_INTERVAL_SECONDS)
+            settled = await asyncio.to_thread(run_reconciliation_cycle)
+            if settled:
+                logger.info("Reconciliation worker settled %d transaction(s)", settled)
+        except asyncio.CancelledError:  # pragma: no cover
+            break
+        except Exception:  # pragma: no cover - keep the worker alive
+            logger.exception("Reconciliation cycle error")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Capture the running loop so sync request handlers can emit socket events.
     set_loop(asyncio.get_running_loop())
     logger.info("FinPay backend started (env=%s)", settings.ENVIRONMENT)
+    worker = None
+    if settings.RECONCILE_WORKER_ENABLED:
+        worker = asyncio.create_task(_reconciliation_worker())
+        logger.info("Reconciliation worker started (interval=%ss)",
+                    settings.RECONCILE_INTERVAL_SECONDS)
     yield
+    if worker:
+        worker.cancel()
     logger.info("FinPay backend shutting down")
 
 

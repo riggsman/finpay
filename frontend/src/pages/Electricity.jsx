@@ -26,7 +26,9 @@ export default function Electricity() {
   const [receipt, setReceipt] = useState(null);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [stillPending, setStillPending] = useState(false);
   const pollRef = useRef(null);
+  const nudgedRef = useRef(false);
 
   useEffect(() => {
     billPaymentsApi.providers("electricity").then((r) => setProviders(r.providers)).catch(() => {});
@@ -106,6 +108,14 @@ export default function Electricity() {
           const latest = await transactionApi.get(created.id);
           if (latest.status === "SUCCESS" || latest.status === "FAILED") {
             finishProcessing(latest);
+          } else if (latest.status === "PENDING") {
+            // Provider timed out — the payment is being reconciled. Nudge the
+            // reconciliation once so it settles promptly.
+            setStillPending(true);
+            if (!nudgedRef.current) {
+              nudgedRef.current = true;
+              transactionApi.reconcile().catch(() => {});
+            }
           }
         } catch {
           /* ignore */
@@ -220,8 +230,12 @@ export default function Electricity() {
         {step === "processing" && (
           <div className="center" style={{ padding: "20px 0" }}>
             <div className="spinner" />
-            <h2 className="mt">Processing payment…</h2>
-            <p className="muted">Waiting for provider confirmation in real time.</p>
+            <h2 className="mt">{stillPending ? "Payment still processing…" : "Processing payment…"}</h2>
+            <p className="muted">
+              {stillPending
+                ? "The provider is taking longer than usual. We're confirming your payment and will update this automatically."
+                : "Waiting for provider confirmation in real time."}
+            </p>
             <span className="pill reconnecting"><span className="status-dot" /> {txn?.reference}</span>
           </div>
         )}

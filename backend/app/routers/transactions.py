@@ -10,8 +10,19 @@ from app.dependencies.auth import get_current_user
 from app.models.transaction import Transaction, TransactionEvent
 from app.models.user import User
 from app.schemas.transaction import TransactionEventPublic, TransactionPublic
+from app.services import reconciliation_service
 
 router = APIRouter(prefix="/transactions", tags=["transactions"])
+
+
+@router.post("/reconcile")
+def reconcile(
+    current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    """Settle the current user's pending transactions (application-open /
+    network-recovery flow)."""
+    count = reconciliation_service.reconcile_for_user(db, current_user.id)
+    return {"reconciled": count}
 
 
 @router.get("", response_model=list[TransactionPublic])
