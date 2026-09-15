@@ -8,6 +8,18 @@ export const walletApi = {
       { amount, funding_method: fundingMethod },
       idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}
     ),
+  send: (recipient, amount, pin, idempotencyKey) =>
+    api.post(
+      "/wallet/send",
+      { recipient, amount, pin },
+      idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}
+    ),
+  withdraw: (amount, destination, pin, idempotencyKey) =>
+    api.post(
+      "/wallet/withdraw",
+      { amount, destination, pin },
+      idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}
+    ),
 };
 
 export const transactionsApi = {

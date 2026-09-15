@@ -66,6 +66,8 @@ export default function Dashboard() {
       setUnread((u) => u + 1);
       setToast(evt.data.title + " — " + evt.data.message);
       setTimeout(() => setToast(null), 4000);
+      // Refresh transactions too so received transfers appear live.
+      transactionsApi.list(10).then(setTransactions).catch(() => {});
       notificationsApi.list(10).then((list) => {
         setNotifications(list);
         if (list[0]) {
@@ -176,6 +178,10 @@ export default function Dashboard() {
               Runs the full engine: transaction → ledger → wallet → event →
               notification → Socket.IO. Balance updates live.
             </p>
+            <div className="row mt">
+              <button className="btn-ghost" onClick={() => navigate("/wallet/send")}>↗ Send money</button>
+              <button className="btn-ghost" onClick={() => navigate("/wallet/withdraw")}>↘ Withdraw</button>
+            </div>
           </div>
 
           <h2 className="mt-lg">Recent transactions</h2>

@@ -30,6 +30,28 @@ def get_wallet(db: Session, user_id: int) -> Wallet:
     return wallet
 
 
+def apply_ledger(db: Session, wallet: Wallet, direction: str, amount: int,
+                 transaction_id: int, description: str | None) -> int:
+    """Adjust a wallet balance and record a ledger entry. Returns new balance."""
+    if direction == "CREDIT":
+        wallet.balance += amount
+    elif direction == "DEBIT":
+        wallet.balance -= amount
+    else:  # pragma: no cover - guarded by callers
+        raise ValueError(f"Unknown ledger direction: {direction}")
+    db.add(
+        LedgerEntry(
+            wallet_id=wallet.id,
+            transaction_id=transaction_id,
+            direction=direction,
+            amount=amount,
+            balance_after=wallet.balance,
+            description=description,
+        )
+    )
+    return wallet.balance
+
+
 def record_event(db: Session, txn: Transaction, event_type: str,
                  previous: str | None, new: str | None,
                  payload: dict | None = None) -> None:

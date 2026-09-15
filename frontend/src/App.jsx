@@ -6,6 +6,7 @@ import ForgotPassword from "./pages/ForgotPassword";
 import Dashboard from "./pages/Dashboard";
 import Services from "./pages/Services";
 import Electricity from "./pages/Electricity";
+import WalletAction from "./pages/WalletAction";
 import ProtectedRoute from "./routes/ProtectedRoute";
 
 export default function App() {
@@ -36,6 +37,22 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Electricity />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/wallet/send"
+        element={
+          <ProtectedRoute>
+            <WalletAction mode="send" />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/wallet/withdraw"
+        element={
+          <ProtectedRoute>
+            <WalletAction mode="withdraw" />
           </ProtectedRoute>
         }
       />
