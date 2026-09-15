@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { transactionsApi } from "../api/transactions";
+import { supportApi } from "../api/support";
 
 function money(minor) {
   return (minor / 100).toLocaleString(undefined, {
@@ -16,6 +17,8 @@ export default function TransactionDetail() {
   const [events, setEvents] = useState([]);
   const [receipt, setReceipt] = useState(null);
   const [error, setError] = useState(null);
+  const [dispute, setDispute] = useState({ open: false, reason: "unauthorized", description: "" });
+  const [disputeMsg, setDisputeMsg] = useState(null);
 
   useEffect(() => {
     transactionsApi.get(id).then(setTxn).catch((e) => setError(e.message));
@@ -30,6 +33,18 @@ export default function TransactionDetail() {
       </div>
     );
   }
+  async function submitDispute(e) {
+    e.preventDefault();
+    setDisputeMsg(null);
+    try {
+      const d = await supportApi.createDispute(txn.id, dispute.reason, dispute.description);
+      setDisputeMsg({ ok: true, text: `Dispute ${d.reference} submitted (${d.status}).` });
+      setDispute({ ...dispute, open: false });
+    } catch (err) {
+      setDisputeMsg({ ok: false, text: err.message });
+    }
+  }
+
   if (!txn) return <div className="container"><p className="muted mt">Loading…</p></div>;
 
   return (
@@ -54,6 +69,29 @@ export default function TransactionDetail() {
           {txn.failure_reason && <div className="review-row"><span className="muted">Failure</span><span>{txn.failure_reason}</span></div>}
           <div className="review-row"><span className="muted">Created</span><span>{new Date(txn.created_at).toLocaleString()}</span></div>
           {txn.completed_at && <div className="review-row"><span className="muted">Completed</span><span>{new Date(txn.completed_at).toLocaleString()}</span></div>}
+
+          {disputeMsg && <div className={`alert ${disputeMsg.ok ? "alert-success" : "alert-error"}`}>{disputeMsg.text}</div>}
+          {!dispute.open ? (
+            <div className="mt">
+              <button className="btn-ghost" onClick={() => setDispute({ ...dispute, open: true })}>Report a problem</button>
+            </div>
+          ) : (
+            <form onSubmit={submitDispute} className="mt">
+              <label>Reason</label>
+              <select value={dispute.reason} onChange={(e) => setDispute({ ...dispute, reason: e.target.value })}>
+                <option value="unauthorized">Unauthorized transaction</option>
+                <option value="not_received">Service not received</option>
+                <option value="wrong_amount">Wrong amount</option>
+                <option value="duplicate">Duplicate charge</option>
+              </select>
+              <label>Details</label>
+              <input value={dispute.description} onChange={(e) => setDispute({ ...dispute, description: e.target.value })} placeholder="Describe the issue" />
+              <div className="row mt">
+                <button className="btn-primary">Submit dispute</button>
+                <button type="button" className="btn-ghost" onClick={() => setDispute({ ...dispute, open: false })}>Cancel</button>
+              </div>
+            </form>
+          )}
         </div>
 
         <div className="card">

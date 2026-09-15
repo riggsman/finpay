@@ -261,3 +261,14 @@ button:disabled { opacity: 0.6; cursor: not-allowed; }
   content: ""; position: absolute; left: 5px; top: 18px; bottom: -8px;
   width: 2px; background: var(--border);
 }
+
+/* Support thread */
+.thread { display: flex; flex-direction: column; gap: 12px; }
+.bubble {
+  max-width: 80%; padding: 12px 14px; border-radius: 14px;
+  border: 1px solid var(--border); background: var(--bg-soft);
+}
+.bubble.me { align-self: flex-end; background: rgba(79,124,255,0.16); border-color: rgba(79,124,255,0.4); }
+.bubble.agent { align-self: flex-start; }
+.bubble-sender { font-size: 12px; font-weight: 700; color: var(--muted); margin-bottom: 4px; }
+textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px rgba(79,124,255,0.25); outline: none; }

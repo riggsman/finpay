@@ -11,6 +11,8 @@ import Security from "./pages/Security";
 import History from "./pages/History";
 import TransactionDetail from "./pages/TransactionDetail";
 import Kyc from "./pages/Kyc";
+import Support from "./pages/Support";
+import TicketDetail from "./pages/TicketDetail";
 import ProtectedRoute from "./routes/ProtectedRoute";
 
 export default function App() {
@@ -89,6 +91,22 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Kyc />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/support"
+        element={
+          <ProtectedRoute>
+            <Support />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/support/tickets/:id"
+        element={
+          <ProtectedRoute>
+            <TicketDetail />
           </ProtectedRoute>
         }
       />
