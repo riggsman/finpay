@@ -105,49 +105,54 @@ def _reconcile_one(db: Session, txn: Transaction) -> None:
         _settle_failed(db, txn, "The provider reported the payment as failed.")
 
 
+def _claim_next(db: Session, extra_filters) -> Transaction | None:
+    """Claim one pending transaction with FOR UPDATE SKIP LOCKED so that
+    concurrent workers (in-process + Celery) never process the same row."""
+    q = db.query(Transaction).filter(
+        Transaction.pending_reconciliation.is_(True),
+        Transaction.status == TransactionStatus.PENDING.value,
+        *extra_filters,
+    )
+    return q.order_by(Transaction.id).with_for_update(skip_locked=True).first()
+
+
 def reconcile_pending(db: Session, min_age_seconds: float | None = None) -> int:
-    """Find pending-reconciliation transactions older than the threshold and
-    settle each against a provider status inquiry. Returns the count settled."""
+    """Settle pending-reconciliation transactions older than the threshold,
+    one at a time under a row lock. Returns the count settled."""
     if min_age_seconds is None:
         min_age_seconds = settings.RECONCILE_MIN_AGE_SECONDS
     cutoff = _now() - dt.timedelta(seconds=min_age_seconds)
-    rows = (
-        db.query(Transaction)
-        .filter(
-            Transaction.pending_reconciliation.is_(True),
-            Transaction.status == TransactionStatus.PENDING.value,
-            Transaction.created_at <= cutoff,
-        )
-        .all()
-    )
-    for txn in rows:
+    settled = 0
+    while True:
+        txn = _claim_next(db, [Transaction.created_at <= cutoff])
+        if txn is None:
+            break
         try:
-            _reconcile_one(db, txn)
+            _reconcile_one(db, txn)  # commits, releasing the row lock
+            settled += 1
         except Exception:  # pragma: no cover - defensive
             logger.exception("Reconcile failed for txn=%s", txn.id)
             db.rollback()
-    return len(rows)
+            break
+    return settled
 
 
 def reconcile_for_user(db: Session, user_id: int) -> int:
     """Immediately reconcile a specific user's pending transactions (used for
     application-open / network-recovery flows)."""
-    rows = (
-        db.query(Transaction)
-        .filter(
-            Transaction.user_id == user_id,
-            Transaction.pending_reconciliation.is_(True),
-            Transaction.status == TransactionStatus.PENDING.value,
-        )
-        .all()
-    )
-    for txn in rows:
+    settled = 0
+    while True:
+        txn = _claim_next(db, [Transaction.user_id == user_id])
+        if txn is None:
+            break
         try:
             _reconcile_one(db, txn)
+            settled += 1
         except Exception:  # pragma: no cover - defensive
             logger.exception("User reconcile failed for txn=%s", txn.id)
             db.rollback()
-    return len(rows)
+            break
+    return settled
 
 
 def run_reconciliation_cycle() -> int:

@@ -1,4 +1,6 @@
 import asyncio
+import collections
+import time
 
 import socketio
 
@@ -43,6 +45,21 @@ _connection_counts: dict[int, int] = {}
 
 def is_user_connected(user_id: int) -> bool:
     return _connection_counts.get(user_id, 0) > 0
+
+
+# Per-connection event rate limiting (SRS section 61).
+_event_times: dict[str, "collections.deque[float]"] = {}
+
+
+def _rate_ok(sid: str) -> bool:
+    now = time.monotonic()
+    dq = _event_times.setdefault(sid, collections.deque())
+    while dq and now - dq[0] > settings.SOCKET_EVENT_WINDOW:
+        dq.popleft()
+    if len(dq) >= settings.SOCKET_EVENT_LIMIT:
+        return False
+    dq.append(now)
+    return True
 
 
 def set_loop(loop: asyncio.AbstractEventLoop) -> None:
@@ -113,12 +130,15 @@ async def disconnect(sid):
         _connection_counts[user_id] -= 1
         if _connection_counts[user_id] <= 0:
             _connection_counts.pop(user_id, None)
+    _event_times.pop(sid, None)
     logger.info("Socket disconnected sid=%s", sid)
 
 
 @sio.on("transaction:subscribe")
 async def transaction_subscribe(sid, data):
     """Allow a client to subscribe to a transaction room it owns."""
+    if not _rate_ok(sid):
+        return {"ok": False, "error": "rate_limited"}
     session = await sio.get_session(sid)
     user_id = session.get("user_id")
     transaction_id = (data or {}).get("transaction_id")
@@ -146,6 +166,8 @@ async def transaction_subscribe(sid, data):
 
 @sio.on("transaction:unsubscribe")
 async def transaction_unsubscribe(sid, data):
+    if not _rate_ok(sid):
+        return {"ok": False, "error": "rate_limited"}
     transaction_id = (data or {}).get("transaction_id")
     if transaction_id:
         await sio.leave_room(sid, f"transaction:{transaction_id}")
@@ -154,19 +176,42 @@ async def transaction_unsubscribe(sid, data):
 
 def emit_to_user(user_id: int, event_type: str, data: dict,
                  event_id: str | None = None) -> None:
-    """Thread-safe emit to a user's room from synchronous code."""
+    """Emit to a user's room from synchronous code (works cross-process)."""
     envelope = make_envelope(event_type, user_id, data, event_id=event_id)
-    _schedule(sio.emit(event_type, envelope, room=f"user:{user_id}"))
+    _emit(event_type, envelope, f"user:{user_id}")
 
 
 def emit_to_transaction(transaction_id: int, event_type: str, user_id: int,
                         data: dict) -> None:
     envelope = make_envelope(event_type, user_id, data)
-    _schedule(sio.emit(event_type, envelope, room=f"transaction:{transaction_id}"))
+    _emit(event_type, envelope, f"transaction:{transaction_id}")
 
 
-def _schedule(coro) -> None:
+# A write-only sync manager lets processes without the server's event loop
+# (e.g. a Celery worker) publish events that the AsyncRedisManager delivers.
+_ext_manager = None
+
+
+def _get_ext_manager():
+    global _ext_manager
+    if _ext_manager is None and settings.use_redis:
+        try:
+            _ext_manager = socketio.RedisManager(settings.REDIS_URL, write_only=True)
+        except Exception:  # pragma: no cover - depends on runtime redis
+            _ext_manager = None
+    return _ext_manager
+
+
+def _emit(event_type: str, envelope: dict, room: str) -> None:
     if _loop and _loop.is_running():
-        asyncio.run_coroutine_threadsafe(coro, _loop)
-    else:  # pragma: no cover - only during tests without a running loop
-        logger.warning("No running event loop; dropping socket emission")
+        asyncio.run_coroutine_threadsafe(sio.emit(event_type, envelope, room=room), _loop)
+        return
+    # No server loop in this process: publish via Redis for cross-process delivery.
+    mgr = _get_ext_manager()
+    if mgr is not None:
+        try:
+            mgr.emit(event_type, envelope, room=room)
+            return
+        except Exception:  # pragma: no cover
+            logger.warning("Cross-process emit failed for %s", event_type)
+    logger.debug("Dropping socket emission %s (no loop, no redis manager)", event_type)

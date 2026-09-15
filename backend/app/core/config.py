@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     RL_PASSWORD_RESET_WINDOW: int = 600
     RL_VERIFY_OTP_LIMIT: int = 12
     RL_VERIFY_OTP_WINDOW: int = 600
+    # Per-connection Socket.IO event rate limit.
+    SOCKET_EVENT_LIMIT: int = 30
+    SOCKET_EVENT_WINDOW: float = 10.0
 
     # --- Firebase Cloud Messaging (push) ---
     # Provide EITHER the full service-account JSON in FCM_SERVICE_ACCOUNT_JSON,
