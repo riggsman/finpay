@@ -1,9 +1,10 @@
 import datetime as dt
 import enum
 
-from sqlalchemy import Boolean, DateTime, Enum, String
+from sqlalchemy import BigInteger, Boolean, DateTime, Enum, String
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.core.config import settings
 from app.db.base import Base
 
 
@@ -25,6 +26,13 @@ class User(Base):
     phone: Mapped[str] = mapped_column(String(32), unique=True, index=True, nullable=False)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     transaction_pin_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Transaction limits in minor units.
+    per_txn_limit: Mapped[int] = mapped_column(
+        BigInteger, default=settings.DEFAULT_PER_TXN_LIMIT, nullable=False
+    )
+    daily_limit: Mapped[int] = mapped_column(
+        BigInteger, default=settings.DEFAULT_DAILY_LIMIT, nullable=False
+    )
     status: Mapped[UserStatus] = mapped_column(
         Enum(UserStatus, name="user_status"),
         default=UserStatus.PENDING_VERIFICATION,

@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     RESET_CODE_TTL_SECONDS: int = 300
     RESET_TOKEN_TTL_SECONDS: int = 600
 
+    # Default transaction limits (minor units).
+    DEFAULT_PER_TXN_LIMIT: int = 50_000_000  # 500,000.00
+    DEFAULT_DAILY_LIMIT: int = 200_000_000  # 2,000,000.00
+
     # Default transaction PIN assigned at activation (development convenience).
     DEFAULT_TRANSACTION_PIN: str = "1234"
     # Validation token lifetime for bill payments (seconds).

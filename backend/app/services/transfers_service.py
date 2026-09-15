@@ -8,7 +8,7 @@ from app.core.exceptions import AuthError, NotFoundError, ValidationError
 from app.core.security import verify_password
 from app.models.transaction import IdempotencyKey, Transaction, TransactionStatus
 from app.models.user import User, UserStatus
-from app.services import wallet_service
+from app.services import security_service, wallet_service
 from app.services.notification_service import create_notification, deliver_notification
 from app.websocket.socket import emit_to_user
 
@@ -72,6 +72,7 @@ def send_money(db: Session, sender: User, recipient_identifier: str, amount: int
     sender_wallet = wallet_service.get_wallet(db, sender.id)
     if sender_wallet.balance < amount:
         raise ValidationError("Insufficient wallet balance.", code="INSUFFICIENT_BALANCE")
+    security_service.check_limits(db, sender, amount)
     recipient_wallet = wallet_service.get_wallet(db, recipient.id)
 
     sender_name = sender.full_name or sender.phone
@@ -163,6 +164,7 @@ def withdraw(db: Session, user: User, amount: int, destination: str, pin: str,
     wallet = wallet_service.get_wallet(db, user.id)
     if wallet.balance < amount:
         raise ValidationError("Insufficient wallet balance.", code="INSUFFICIENT_BALANCE")
+    security_service.check_limits(db, user, amount)
 
     txn = _new_txn(user.id, "WITHDRAW", amount, wallet.currency,
                    f"Withdrawal to {destination}")

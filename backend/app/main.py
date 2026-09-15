@@ -14,6 +14,7 @@ from app.routers import (
     bill_payments,
     dashboard,
     notifications,
+    security,
     services,
     transactions,
     users,
@@ -63,6 +64,7 @@ def health():
 api = settings.API_V1_PREFIX
 app.include_router(auth.router, prefix=api)
 app.include_router(users.router, prefix=api)
+app.include_router(security.router, prefix=api)
 app.include_router(wallet.router, prefix=api)
 app.include_router(transactions.router, prefix=api)
 app.include_router(dashboard.router, prefix=api)

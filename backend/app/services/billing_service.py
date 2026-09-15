@@ -17,7 +17,7 @@ from app.models.transaction import (
 )
 from app.models.user import User
 from app.models.wallet import LedgerEntry
-from app.services import wallet_service
+from app.services import security_service, wallet_service
 from app.services.notification_service import create_notification, deliver_notification
 from app.websocket.socket import emit_to_transaction, emit_to_user
 
@@ -114,6 +114,7 @@ def confirm_electricity(db: Session, user: User, validation_token: str, amount: 
     wallet = wallet_service.get_wallet(db, user.id)
     if wallet.balance < amount:
         raise ValidationError("Insufficient wallet balance.", code="INSUFFICIENT_BALANCE")
+    security_service.check_limits(db, user, amount)
 
     validation.consumed = True
 
