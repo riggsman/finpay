@@ -185,14 +185,17 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <h2 className="mt-lg">Recent transactions</h2>
+          <div className="mt-lg" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <h2 style={{ margin: 0 }}>Recent transactions</h2>
+            <span className="link small" onClick={() => navigate("/transactions")}>View all</span>
+          </div>
           {transactions.length === 0 ? (
             <div className="empty">No transactions yet.</div>
           ) : (
             transactions.map((t) => {
               const isCredit = CREDIT_TYPES.has(t.type);
               return (
-                <div className="txn" key={t.id}>
+                <div className="txn clickable" key={t.id} onClick={() => navigate(`/transactions/${t.id}`)}>
                   <div className="meta">
                     <span>{t.type.replaceAll("_", " ")}</span>
                     <span className="muted small">{t.reference}</span>

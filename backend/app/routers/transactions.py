@@ -1,4 +1,7 @@
+import datetime as dt
+
 from fastapi import APIRouter, Depends, Query
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.exceptions import NotFoundError
@@ -16,15 +19,39 @@ def list_transactions(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
     limit: int = Query(default=20, ge=1, le=100),
+    page: int = Query(default=1, ge=1),
     status: str | None = None,
     type: str | None = None,
+    date_from: dt.datetime | None = None,
+    date_to: dt.datetime | None = None,
+    amount_min: int | None = Query(default=None, ge=0),
+    amount_max: int | None = Query(default=None, ge=0),
+    search: str | None = None,
 ):
     q = db.query(Transaction).filter(Transaction.user_id == current_user.id)
     if status:
         q = q.filter(Transaction.status == status)
     if type:
         q = q.filter(Transaction.type == type)
-    rows = q.order_by(Transaction.created_at.desc()).limit(limit).all()
+    if date_from:
+        q = q.filter(Transaction.created_at >= date_from)
+    if date_to:
+        q = q.filter(Transaction.created_at <= date_to)
+    if amount_min is not None:
+        q = q.filter(Transaction.amount >= amount_min)
+    if amount_max is not None:
+        q = q.filter(Transaction.amount <= amount_max)
+    if search:
+        like = f"%{search}%"
+        q = q.filter(
+            or_(Transaction.reference.ilike(like), Transaction.description.ilike(like))
+        )
+    rows = (
+        q.order_by(Transaction.created_at.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
     return [TransactionPublic.model_validate(r) for r in rows]
 
 
