@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { dashboardApi, notificationsApi, transactionsApi, walletApi } from "../api/wallet";
+import { kycApi } from "../api/kyc";
 import { socketService } from "../services/socketService";
 import { useAuth } from "../store/AuthContext";
 
@@ -33,6 +34,7 @@ export default function Dashboard() {
   const [busy, setBusy] = useState(false);
   const [flashId, setFlashId] = useState(null);
   const [toast, setToast] = useState(null);
+  const [kycStatus, setKycStatus] = useState(null);
   const flashRef = useRef(null);
 
   const refresh = useCallback(async () => {
@@ -50,6 +52,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     refresh().catch(() => {});
+    kycApi.get().then((k) => setKycStatus(k.status)).catch(() => {});
   }, [refresh]);
 
   // Wire realtime events to live UI updates (SRS section 59).
@@ -78,14 +81,20 @@ export default function Dashboard() {
       });
     };
 
+    const onKyc = (evt) => {
+      if (evt?.data?.status) setKycStatus(evt.data.status);
+    };
+
     socketService.on("WALLET_BALANCE_UPDATED", onWallet);
     socketService.on("TRANSACTION_SUCCESS", onTxn);
     socketService.on("notification:new", onNotif);
+    socketService.on("KYC_STATUS_UPDATED", onKyc);
 
     return () => {
       socketService.off("WALLET_BALANCE_UPDATED", onWallet);
       socketService.off("TRANSACTION_SUCCESS", onTxn);
       socketService.off("notification:new", onNotif);
+      socketService.off("KYC_STATUS_UPDATED", onKyc);
       unsub();
     };
   }, []);
@@ -144,6 +153,23 @@ export default function Dashboard() {
       </div>
 
       {toast && <div className="alert alert-success">{toast}</div>}
+
+      {kycStatus && kycStatus !== "APPROVED" && (
+        <div className="alert alert-info" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span>
+            {kycStatus === "UNDER_REVIEW"
+              ? "Your identity verification is under review."
+              : kycStatus === "REJECTED"
+              ? "Identity verification failed. Please resubmit."
+              : "Verify your identity to raise your transaction limits."}
+          </span>
+          {kycStatus !== "UNDER_REVIEW" && (
+            <button className="btn-accent" style={{ flex: "0 0 auto" }} onClick={() => navigate("/kyc")}>
+              {kycStatus === "REJECTED" ? "Resubmit KYC" : "Verify identity"}
+            </button>
+          )}
+        </div>
+      )}
 
       <p className="muted">
         Welcome back, <strong style={{ color: "var(--text)" }}>{user?.first_name}</strong>.

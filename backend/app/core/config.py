@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     DEFAULT_PER_TXN_LIMIT: int = 50_000_000  # 500,000.00
     DEFAULT_DAILY_LIMIT: int = 200_000_000  # 2,000,000.00
 
+    # Higher limits granted once KYC is approved.
+    KYC_APPROVED_PER_TXN_LIMIT: int = 200_000_000  # 2,000,000.00
+    KYC_APPROVED_DAILY_LIMIT: int = 1_000_000_000  # 10,000,000.00
+    # Simulated KYC review delay (seconds).
+    KYC_REVIEW_DELAY_SECONDS: float = 2.0
+
     # Default transaction PIN assigned at activation (development convenience).
     DEFAULT_TRANSACTION_PIN: str = "1234"
     # Validation token lifetime for bill payments (seconds).

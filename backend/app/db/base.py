@@ -15,4 +15,5 @@ from app.models import (  # noqa: E402,F401
     notification,
     billing,
     password_reset,
+    kyc,
 )

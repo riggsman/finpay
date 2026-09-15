@@ -12,8 +12,9 @@ API = settings.API_V1_PREFIX
 
 @pytest.fixture(scope="session", autouse=True)
 def _fast_provider():
-    # Speed up the simulated provider so async-completion tests are quick.
+    # Speed up simulated async operations so completion tests are quick.
     settings.PROVIDER_PROCESSING_DELAY_SECONDS = 0.1
+    settings.KYC_REVIEW_DELAY_SECONDS = 0.1
     yield
 
 

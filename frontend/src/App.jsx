@@ -10,6 +10,7 @@ import WalletAction from "./pages/WalletAction";
 import Security from "./pages/Security";
 import History from "./pages/History";
 import TransactionDetail from "./pages/TransactionDetail";
+import Kyc from "./pages/Kyc";
 import ProtectedRoute from "./routes/ProtectedRoute";
 
 export default function App() {
@@ -80,6 +81,14 @@ export default function App() {
         element={
           <ProtectedRoute>
             <TransactionDetail />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/kyc"
+        element={
+          <ProtectedRoute>
+            <Kyc />
           </ProtectedRoute>
         }
       />

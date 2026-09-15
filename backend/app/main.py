@@ -13,6 +13,7 @@ from app.routers import (
     auth,
     bill_payments,
     dashboard,
+    kyc,
     notifications,
     security,
     services,
@@ -65,6 +66,7 @@ api = settings.API_V1_PREFIX
 app.include_router(auth.router, prefix=api)
 app.include_router(users.router, prefix=api)
 app.include_router(security.router, prefix=api)
+app.include_router(kyc.router, prefix=api)
 app.include_router(wallet.router, prefix=api)
 app.include_router(transactions.router, prefix=api)
 app.include_router(dashboard.router, prefix=api)
