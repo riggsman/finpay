@@ -36,3 +36,15 @@ class SessionPublic(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class ActivityPublic(BaseModel):
+    id: int
+    action: str
+    entity_type: str | None = None
+    result: str
+    ip: str | None = None
+    created_at: dt.datetime
+
+    class Config:
+        from_attributes = True

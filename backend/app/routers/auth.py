@@ -2,10 +2,17 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.exceptions import AuthError
+from app.core.security import create_access_token, decode_token
 from app.db.database import get_db
+from app.dependencies.auth import get_current_user
+from app.models.token import RefreshToken
+from app.models.user import User, UserStatus
 from app.schemas.auth import (
+    AccessTokenResponse,
     LoginRequest,
     MessageResponse,
+    RefreshRequest,
     PasswordResetCompleteRequest,
     PasswordResetRequest,
     PasswordResetRequestResponse,
@@ -18,7 +25,7 @@ from app.schemas.auth import (
     UserPublic,
     VerifyOtpRequest,
 )
-from app.services import auth_service, password_reset_service
+from app.services import audit_service, auth_service, password_reset_service
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -98,7 +105,14 @@ def password_reset_complete(payload: PasswordResetCompleteRequest, db: Session =
 
 @router.post("/login", response_model=TokenResponse)
 def login(payload: LoginRequest, db: Session = Depends(get_db)):
-    user, access, refresh = auth_service.login(db, payload.identifier, payload.password)
+    try:
+        user, access, refresh = auth_service.login(db, payload.identifier, payload.password)
+    except AuthError as exc:
+        audit_service.record(db, "LOGIN", result="FAILURE",
+                             meta={"identifier": payload.identifier, "code": exc.code})
+        db.commit()
+        raise
+    audit_service.record(db, "LOGIN", user_id=user.id, result="SUCCESS")
     db.commit()
     return TokenResponse(
         access_token=access,
@@ -106,3 +120,46 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)):
         expires_in=settings.ACCESS_TOKEN_EXPIRE_SECONDS,
         user=UserPublic.model_validate(user),
     )
+
+
+@router.post("/refresh", response_model=AccessTokenResponse)
+def refresh_token(payload: RefreshRequest, db: Session = Depends(get_db)):
+    try:
+        claims = decode_token(payload.refresh_token)
+    except Exception:
+        raise AuthError("Invalid or expired refresh token.", code="INVALID_REFRESH_TOKEN")
+    if claims.get("type") != "refresh":
+        raise AuthError("Invalid token type.", code="INVALID_TOKEN_TYPE")
+
+    jti = claims.get("jti")
+    row = db.query(RefreshToken).filter(RefreshToken.jti == jti).one_or_none()
+    if not row or row.revoked:
+        raise AuthError("Refresh token has been revoked.", code="REFRESH_TOKEN_REVOKED")
+
+    try:
+        user_id = int(claims["sub"])
+    except (KeyError, ValueError, TypeError):
+        raise AuthError("Invalid token subject.", code="INVALID_REFRESH_TOKEN")
+
+    user = db.get(User, user_id)
+    if not user or user.status != UserStatus.ACTIVE:
+        raise AuthError("Account is not active.", code="ACCOUNT_INACTIVE")
+
+    access = create_access_token(str(user.id))
+    audit_service.record(db, "TOKEN_REFRESH", user_id=user.id)
+    db.commit()
+    return AccessTokenResponse(
+        access_token=access, expires_in=settings.ACCESS_TOKEN_EXPIRE_SECONDS
+    )
+
+
+@router.post("/logout", response_model=MessageResponse)
+def logout(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    revoked = (
+        db.query(RefreshToken)
+        .filter(RefreshToken.user_id == current_user.id, RefreshToken.revoked.is_(False))
+        .update({RefreshToken.revoked: True})
+    )
+    audit_service.record(db, "LOGOUT", user_id=current_user.id, meta={"revoked": revoked})
+    db.commit()
+    return MessageResponse(message="Signed out.")

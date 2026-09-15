@@ -77,9 +77,20 @@ register_exception_handlers(app)
 
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
-    request.state.request_id = "req_" + uuid.uuid4().hex[:16]
+    from app.core.context import set_request_context
+
+    request_id = "req_" + uuid.uuid4().hex[:16]
+    request.state.request_id = request_id
+    client_ip = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (
+        request.client.host if request.client else None
+    )
+    set_request_context(
+        request_id=request_id,
+        ip=client_ip,
+        user_agent=request.headers.get("user-agent"),
+    )
     response = await call_next(request)
-    response.headers["X-Request-ID"] = request.state.request_id
+    response.headers["X-Request-ID"] = request_id
     return response
 
 

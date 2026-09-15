@@ -44,6 +44,8 @@ export default function Security() {
   const [devices, setDevices] = useState([]);
   const [pushMsg, setPushMsg] = useState(null);
 
+  const [activity, setActivity] = useState([]);
+
   useEffect(() => {
     authApi.me().then((me) =>
       setProfile({ first_name: me.first_name || "", last_name: me.last_name || "", email: me.email || "" })
@@ -54,6 +56,7 @@ export default function Security() {
     refreshSessions();
     devicesApi.config().then((c) => setFcmEnabled(c.fcm_enabled)).catch(() => {});
     refreshDevices();
+    securityApi.activity(30).then(setActivity).catch(() => {});
   }, []);
 
   function refreshSessions() {
@@ -242,6 +245,24 @@ export default function Security() {
         <div className="mt">
           <button className="btn-ghost" onClick={enablePush}>Enable push on this device</button>
         </div>
+      </Section>
+
+      <Section title="Recent activity">
+        {activity.length === 0 ? (
+          <div className="empty">No recent activity.</div>
+        ) : (
+          activity.map((a) => (
+            <div className="txn" key={a.id}>
+              <div className="meta">
+                <span>{a.action.replaceAll("_", " ")}</span>
+                <span className="muted small">
+                  {new Date(a.created_at).toLocaleString()}{a.ip ? ` · ${a.ip}` : ""}
+                </span>
+              </div>
+              <span className={`badge ${a.result === "SUCCESS" ? "SUCCESS" : "FAILED"}`}>{a.result}</span>
+            </div>
+          ))
+        )}
       </Section>
     </div>
   );

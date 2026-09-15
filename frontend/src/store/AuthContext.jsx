@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { setAccessToken } from "../api/client";
+import { authApi } from "../api/auth";
 import { socketService } from "../services/socketService";
 import { registerDevice } from "../services/pushService";
 
@@ -38,7 +39,11 @@ export function AuthProvider({ children }) {
       user: auth?.user || null,
       isAuthenticated: Boolean(auth?.access_token),
       login: (tokenResponse) => setAuth(tokenResponse),
-      logout: () => setAuth(null),
+      logout: () => {
+        // Best-effort server-side sign-out (revokes refresh tokens + audit).
+        authApi.logout().catch(() => {});
+        setAuth(null);
+      },
     }),
     [auth]
   );

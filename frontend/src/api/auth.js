@@ -13,4 +13,5 @@ export const authApi = {
     api.post("/auth/password-reset/verify", { identifier, code }),
   passwordResetComplete: (reset_token, new_password) =>
     api.post("/auth/password-reset/complete", { reset_token, new_password }),
+  logout: () => api.post("/auth/logout"),
 };

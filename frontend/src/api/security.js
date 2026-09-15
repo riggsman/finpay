@@ -11,4 +11,5 @@ export const securityApi = {
     api.patch("/me/security/limits", { per_txn_limit, daily_limit }),
   listSessions: () => api.get("/me/security/sessions"),
   revokeAllSessions: () => api.post("/me/security/sessions/revoke-all"),
+  activity: (limit = 30) => api.get(`/me/security/activity?limit=${limit}`),
 };

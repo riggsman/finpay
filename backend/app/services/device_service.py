@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.core.exceptions import NotFoundError
 from app.models.device import UserDevice
 from app.models.user import User
+from app.services import audit_service
 
 
 def _now() -> dt.datetime:
@@ -37,6 +38,9 @@ def register_device(db: Session, user: User, device_id: str, device_type: str,
     device.is_active = True
     device.last_seen_at = _now()
     db.flush()
+    audit_service.record(db, "DEVICE_REGISTERED", user_id=user.id, entity_type="device",
+                         entity_id=device.id,
+                         meta={"device_type": device.device_type, "push": bool(push_token)})
     return device
 
 

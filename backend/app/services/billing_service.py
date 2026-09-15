@@ -17,7 +17,7 @@ from app.models.transaction import (
 )
 from app.models.user import User
 from app.models.wallet import LedgerEntry
-from app.services import security_service, wallet_service
+from app.services import audit_service, security_service, wallet_service
 from app.services.notification_service import create_notification, deliver_notification
 from app.websocket.socket import emit_to_transaction, emit_to_user
 
@@ -146,6 +146,10 @@ def confirm_electricity(db: Session, user: User, validation_token: str, amount: 
 
     if idempotency_key:
         db.add(IdempotencyKey(key=idempotency_key, user_id=user.id, transaction_id=txn.id))
+
+    audit_service.record(db, "TRANSACTION_CREATED", user_id=user.id,
+                         entity_type="transaction", entity_id=txn.id,
+                         meta={"type": "ELECTRICITY", "amount": amount})
 
     wallet_service.record_event(db, txn, "TRANSACTION_CREATED", None,
                                 TransactionStatus.CREATED.value)

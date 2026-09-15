@@ -12,6 +12,7 @@ from app.models.transaction import (
     TransactionStatus,
 )
 from app.models.wallet import LedgerEntry, Wallet
+from app.services import audit_service
 from app.services.notification_service import create_notification, deliver_notification
 from app.websocket.socket import emit_to_transaction, emit_to_user
 
@@ -157,6 +158,10 @@ def add_money(db: Session, user_id: int, amount: int, funding_method: str,
         priority="HIGH",
         data={"transaction_id": txn.id, "amount": amount},
     )
+
+    audit_service.record(db, "TRANSACTION_CREATED", user_id=user_id, entity_type="transaction",
+                         entity_id=txn.id,
+                         meta={"type": txn.type, "amount": amount, "status": txn.status})
 
     # Commit the whole unit of work atomically.
     db.commit()

@@ -6,6 +6,7 @@ from app.dependencies.auth import get_current_user
 from app.models.user import User
 from app.schemas.auth import MessageResponse, UserPublic
 from app.schemas.security import (
+    ActivityPublic,
     ChangePasswordRequest,
     LimitsResponse,
     LimitsUpdateRequest,
@@ -13,7 +14,7 @@ from app.schemas.security import (
     SessionPublic,
     SetPinRequest,
 )
-from app.services import security_service
+from app.services import audit_service, security_service
 
 router = APIRouter(prefix="/me", tags=["profile-security"])
 
@@ -90,3 +91,13 @@ def revoke_all_sessions(
     count = security_service.revoke_other_sessions(db, current_user)
     db.commit()
     return MessageResponse(message=f"Revoked {count} session(s).")
+
+
+@router.get("/security/activity", response_model=list[ActivityPublic])
+def security_activity(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    limit: int = 50,
+):
+    rows = audit_service.list_for_user(db, current_user.id, limit=limit)
+    return [ActivityPublic.model_validate(r) for r in rows]

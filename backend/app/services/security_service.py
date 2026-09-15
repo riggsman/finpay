@@ -8,6 +8,7 @@ from app.core.security import hash_password, verify_password
 from app.models.token import RefreshToken
 from app.models.transaction import Transaction, TransactionStatus
 from app.models.user import User
+from app.services import audit_service
 from app.services.notification_service import create_notification, deliver_notification
 
 # Transaction types that draw down the wallet and count toward limits.
@@ -30,6 +31,8 @@ def update_profile(db: Session, user: User, first_name: str | None,
         user.first_name = first_name
     if last_name is not None:
         user.last_name = last_name
+    audit_service.record(db, "PROFILE_UPDATED", user_id=user.id, entity_type="user",
+                         entity_id=user.id)
     db.flush()
     return user
 
@@ -43,6 +46,8 @@ def change_password(db: Session, user: User, current_password: str,
     db.query(RefreshToken).filter(
         RefreshToken.user_id == user.id, RefreshToken.revoked.is_(False)
     ).update({RefreshToken.revoked: True})
+    audit_service.record(db, "PASSWORD_CHANGED", user_id=user.id, entity_type="user",
+                         entity_id=user.id)
     notif = create_notification(
         db, user_id=user.id, type="PASSWORD_CHANGED", title="Password Changed",
         message="Your account password was changed.", priority="HIGH",
@@ -58,6 +63,8 @@ def set_pin(db: Session, user: User, current_pin: str | None, new_pin: str) -> N
         if not current_pin or not verify_password(current_pin, user.transaction_pin_hash):
             raise AuthError("Current PIN is incorrect.", code="INVALID_PIN")
     user.transaction_pin_hash = hash_password(new_pin)
+    audit_service.record(db, "PIN_CHANGED", user_id=user.id, entity_type="user",
+                         entity_id=user.id)
     notif = create_notification(
         db, user_id=user.id, type="PIN_CHANGED", title="Transaction PIN Changed",
         message="Your transaction PIN was updated.", priority="HIGH",
@@ -77,6 +84,9 @@ def update_limits(db: Session, user: User, per_txn_limit: int | None,
                               code="INVALID_LIMIT_RANGE")
     user.per_txn_limit = new_per
     user.daily_limit = new_daily
+    audit_service.record(db, "LIMITS_UPDATED", user_id=user.id, entity_type="user",
+                         entity_id=user.id,
+                         meta={"per_txn_limit": new_per, "daily_limit": new_daily})
     db.flush()
     return user
 

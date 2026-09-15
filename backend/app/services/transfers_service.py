@@ -8,7 +8,7 @@ from app.core.exceptions import AuthError, NotFoundError, ValidationError
 from app.core.security import verify_password
 from app.models.transaction import IdempotencyKey, Transaction, TransactionStatus
 from app.models.user import User, UserStatus
-from app.services import security_service, wallet_service
+from app.services import audit_service, security_service, wallet_service
 from app.services.notification_service import create_notification, deliver_notification
 from app.websocket.socket import emit_to_user
 
@@ -123,6 +123,9 @@ def send_money(db: Session, sender: User, recipient_identifier: str, amount: int
         priority="HIGH", data={"transaction_id": recipient_txn.id, "amount": amount},
     )
 
+    audit_service.record(db, "TRANSACTION_CREATED", user_id=sender.id,
+                         entity_type="transaction", entity_id=sender_txn.id,
+                         meta={"type": "SEND_MONEY", "amount": amount, "status": "SUCCESS"})
     db.commit()
     db.refresh(sender_txn)
 
@@ -193,6 +196,9 @@ def withdraw(db: Session, user: User, amount: int, destination: str, pin: str,
         message=f"You withdrew {amount / 100:,.2f} {wallet.currency} to {destination}.",
         priority="HIGH", data={"transaction_id": txn.id, "amount": amount},
     )
+    audit_service.record(db, "TRANSACTION_CREATED", user_id=user.id,
+                         entity_type="transaction", entity_id=txn.id,
+                         meta={"type": "WITHDRAW", "amount": amount, "status": "SUCCESS"})
 
     db.commit()
     db.refresh(txn)

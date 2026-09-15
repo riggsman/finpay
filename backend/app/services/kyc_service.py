@@ -9,6 +9,7 @@ from app.core.logging import get_logger
 from app.db.database import SessionLocal
 from app.models.kyc import KycProfile, KycStatus
 from app.models.user import User
+from app.services import audit_service
 from app.services.notification_service import create_notification, deliver_notification
 from app.websocket.socket import emit_to_user
 
@@ -68,6 +69,8 @@ def submit(db: Session, user: User) -> KycProfile:
     kyc.status = KycStatus.UNDER_REVIEW.value
     kyc.submitted_at = _now()
     kyc.rejection_reason = None
+    audit_service.record(db, "KYC_SUBMITTED", user_id=user.id, entity_type="kyc",
+                         entity_id=kyc.id)
     db.commit()
     db.refresh(kyc)
 
@@ -117,6 +120,11 @@ def _run_review(kyc_id: int, user_id: int) -> None:
                 priority="HIGH",
             )
 
+        audit_service.record(
+            db, "KYC_APPROVED" if approved else "KYC_REJECTED", user_id=user_id,
+            entity_type="kyc", entity_id=kyc.id,
+            result="SUCCESS" if approved else "FAILURE",
+        )
         db.commit()
         db.refresh(kyc)
 
