@@ -43,8 +43,25 @@ def seed_admin(db: Session) -> None:
         if admin.email != settings.ADMIN_EMAIL:
             admin.email = settings.ADMIN_EMAIL
             changed = True
+        if admin.phone != settings.ADMIN_PHONE:
+            admin.phone = settings.ADMIN_PHONE
+            changed = True
+        if admin.status != UserStatus.ACTIVE:
+            admin.status = UserStatus.ACTIVE
+            changed = True
+        # Keep the seeded admin password aligned with settings in non-production
+        # so local Back Office login does not drift after domain/config changes.
+        if settings.ENVIRONMENT.lower() in {"development", "dev", "local", "test"}:
+            from app.core.security import verify_password
+
+            if not admin.password_hash or not verify_password(
+                settings.ADMIN_PASSWORD, admin.password_hash
+            ):
+                admin.password_hash = hash_password(settings.ADMIN_PASSWORD)
+                changed = True
         if changed:
             db.commit()
+            logger.info("Updated Back Office admin %s", settings.ADMIN_EMAIL)
 
 
 def seed_all(db: Session) -> None:

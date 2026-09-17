@@ -4,12 +4,21 @@ from .conftest import auth_headers, fund_wallet, register_active_user
 
 API = settings.API_V1_PREFIX
 
+# Synthetic payload long enough to pass screenshot size validation.
+TINY_JPEG_B64 = "A" * 400
 
-def _create_ticket(client, token):
+
+def _create_ticket(client, token, **extra):
+    body = {
+        "subject": "Card declined",
+        "category": "payments",
+        "message": "It failed twice.",
+        **extra,
+    }
     return client.post(
         f"{API}/support/tickets",
         headers=auth_headers(token),
-        json={"subject": "Card declined", "category": "payments", "message": "It failed twice."},
+        json=body,
     )
 
 
@@ -28,6 +37,87 @@ def test_create_ticket_adds_agent_ack(client):
 
     notifs = client.get(f"{API}/notifications", headers=auth_headers(token)).json()
     assert any(n["type"] == "SUPPORT_TICKET_UPDATE" for n in notifs)
+
+
+def test_create_ticket_with_screenshot_and_context(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "SUPPORT_UPLOAD_DIR", str(tmp_path))
+    user = register_active_user(client)
+    token = user["access_token"]
+    r = _create_ticket(
+        client,
+        token,
+        page_url="https://app.local/wallet",
+        user_agent="FinPayTest/1.0",
+        context={"path": "/wallet", "viewport": {"width": 390, "height": 844}},
+        screenshot_base64=f"data:image/jpeg;base64,{TINY_JPEG_B64}",
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["has_screenshot"] is True
+    assert data["page_url"] == "https://app.local/wallet"
+    assert data["context"]["path"] == "/wallet"
+
+    shot = client.get(
+        f"{API}/support/tickets/{data['id']}/screenshot",
+        headers=auth_headers(token),
+    )
+    assert shot.status_code == 200
+    assert shot.headers["content-type"].startswith("image/")
+
+
+def test_admin_lists_and_replies_to_tickets(client, admin_token, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "SUPPORT_UPLOAD_DIR", str(tmp_path))
+    user = register_active_user(client)
+    created = _create_ticket(
+        client,
+        user["access_token"],
+        screenshot_base64=f"data:image/jpeg;base64,{TINY_JPEG_B64}",
+    )
+    assert created.status_code == 200, created.text
+    tid = created.json()["id"]
+
+    listed = client.get(
+        f"{API}/admin/tickets",
+        headers=auth_headers(admin_token),
+    )
+    assert listed.status_code == 200
+    assert any(t["id"] == tid for t in listed.json())
+
+    detail = client.get(
+        f"{API}/admin/tickets/{tid}",
+        headers=auth_headers(admin_token),
+    )
+    assert detail.status_code == 200
+    body = detail.json()
+    assert body["has_screenshot"] is True
+    assert body["user_id"] > 0
+
+    shot = client.get(
+        f"{API}/admin/tickets/{tid}/screenshot",
+        headers=auth_headers(admin_token),
+    )
+    assert shot.status_code == 200
+
+    reply = client.post(
+        f"{API}/admin/tickets/{tid}/messages",
+        headers=auth_headers(admin_token),
+        json={"body": "We are looking into this."},
+    )
+    assert reply.status_code == 200
+    assert reply.json()["sender"] == "agent"
+
+    status = client.post(
+        f"{API}/admin/tickets/{tid}/status",
+        headers=auth_headers(admin_token),
+        json={"status": "RESOLVED"},
+    )
+    assert status.status_code == 200
+    assert status.json()["status"] == "RESOLVED"
+
+    notifs = client.get(
+        f"{API}/notifications", headers=auth_headers(user["access_token"])
+    ).json()
+    assert any(n["type"] == "SUPPORT_TICKET_REPLY" for n in notifs)
 
 
 def test_reply_and_close_ticket(client):

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.core.exceptions import AppError
 from app.db.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.user import User
@@ -8,13 +9,17 @@ from app.schemas.auth import MessageResponse, UserPublic
 from app.schemas.security import (
     ActivityPublic,
     ChangePasswordRequest,
-    LimitsResponse,
     LimitsUpdateRequest,
     ProfileUpdateRequest,
     SessionPublic,
     SetPinRequest,
 )
-from app.services import audit_service, security_service
+from app.schemas.limits import (
+    LimitIncreaseCreate,
+    LimitIncreasePublic,
+    LimitsResponse,
+)
+from app.services import audit_service, limit_service, security_service
 
 router = APIRouter(prefix="/me", tags=["profile-security"])
 
@@ -25,11 +30,11 @@ def update_profile(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    user = security_service.update_profile(
-        db, current_user, payload.first_name, payload.last_name, payload.email
+    raise AppError(
+        "Profile details cannot be edited. Only your profile picture can be changed in the app.",
+        code="PROFILE_LOCKED",
+        status_code=403,
     )
-    db.commit()
-    return UserPublic.model_validate(user)
 
 
 @router.post("/security/change-password", response_model=MessageResponse)
@@ -57,10 +62,37 @@ def set_pin(
 
 
 @router.get("/security/limits", response_model=LimitsResponse)
-def get_limits(current_user: User = Depends(get_current_user)):
-    return LimitsResponse(
-        per_txn_limit=current_user.per_txn_limit, daily_limit=current_user.daily_limit
+def get_limits(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    snap = limit_service.limits_snapshot(db, current_user)
+    return LimitsResponse(**snap)
+
+
+@router.post("/security/limit-requests", response_model=LimitIncreasePublic)
+def create_limit_request(
+    payload: LimitIncreaseCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    row = limit_service.create_request(
+        db,
+        current_user,
+        requested_per_txn_limit=payload.requested_per_txn_limit,
+        requested_daily_limit=payload.requested_daily_limit,
+        reason=payload.reason,
     )
+    return LimitIncreasePublic.model_validate(row)
+
+
+@router.get("/security/limit-requests", response_model=list[LimitIncreasePublic])
+def list_limit_requests(
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    rows = limit_service.list_for_user(db, current_user.id)
+    return [LimitIncreasePublic.model_validate(r) for r in rows]
 
 
 @router.patch("/security/limits", response_model=LimitsResponse)
@@ -69,11 +101,12 @@ def update_limits(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    user = security_service.update_limits(
-        db, current_user, payload.per_txn_limit, payload.daily_limit
+    raise AppError(
+        "Transaction limits are set by the system and cannot be changed by users. "
+        "Submit a limit increase request instead.",
+        code="LIMITS_LOCKED",
+        status_code=403,
     )
-    db.commit()
-    return LimitsResponse(per_txn_limit=user.per_txn_limit, daily_limit=user.daily_limit)
 
 
 @router.get("/security/sessions", response_model=list[SessionPublic])

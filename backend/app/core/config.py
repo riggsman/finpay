@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     KYC_REVIEW_DELAY_SECONDS: float = 2.0
     KYC_AUTO_REVIEW_ENABLED: bool = False
     KYC_UPLOAD_DIR: str = "uploads/kyc"
+    SUPPORT_UPLOAD_DIR: str = "uploads/support"
 
     # Default transaction PIN assigned at activation (development convenience).
     DEFAULT_TRANSACTION_PIN: str = "1234"
@@ -60,8 +61,8 @@ class Settings(BaseSettings):
 
     # Reconciliation worker: settles transactions left pending by provider timeouts.
     RECONCILE_WORKER_ENABLED: bool = True
-    RECONCILE_INTERVAL_SECONDS: float = 5.0
-    RECONCILE_MIN_AGE_SECONDS: float = 3.0
+    RECONCILE_INTERVAL_SECONDS: float = 3.0
+    RECONCILE_MIN_AGE_SECONDS: float = 1.0
 
     CORS_ORIGINS: str = "http://localhost:5173,http://127.0.0.1:5173"
 

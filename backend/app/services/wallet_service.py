@@ -178,6 +178,7 @@ def settle_campay_deposit_success(db: Session, txn: Transaction) -> Transaction:
     if txn.status == TransactionStatus.SUCCESS.value:
         return txn
     if txn.status not in (
+        TransactionStatus.CREATED.value,
         TransactionStatus.PENDING.value,
         TransactionStatus.PROCESSING.value,
     ):

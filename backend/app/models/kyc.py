@@ -39,6 +39,7 @@ class KycProfile(Base):
     id_type: Mapped[str | None] = mapped_column(String(40), nullable=True)
     id_number: Mapped[str | None] = mapped_column(String(64), nullable=True)
     id_document_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    id_document_back_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
     selfie_ref: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
     rejection_reason: Mapped[str | None] = mapped_column(Text, nullable=True)

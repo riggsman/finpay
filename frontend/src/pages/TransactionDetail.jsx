@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { transactionsApi } from "../api/transactions";
 import { supportApi } from "../api/support";
+import { transactionStatusClass, transactionTitle } from "../utils/transactions";
 
 function money(minor) {
   return (minor / 100).toLocaleString(undefined, {
@@ -54,8 +55,10 @@ export default function TransactionDetail() {
         <button className="btn-ghost" onClick={() => navigate(-1)}>← Back</button>
       </div>
 
-      <h1>{txn.type.replaceAll("_", " ")}</h1>
-      <span className={`badge ${txn.status}`}>{txn.status}</span>
+      <div className="txn-detail-head">
+        <h1>{transactionTitle(txn)}</h1>
+        <span className={`badge ${transactionStatusClass(txn.status)}`}>{txn.status}</span>
+      </div>
 
       <div className="grid mt">
         <div className="card">

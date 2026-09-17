@@ -13,5 +13,7 @@ export const authApi = {
     api.post("/auth/password-reset/verify", { identifier, code }),
   passwordResetComplete: (reset_token, new_password) =>
     api.post("/auth/password-reset/complete", { reset_token, new_password }),
+  /** Refresh is handled automatically by the API client; exposed for manual renewals. */
+  refresh: (refresh_token) => api.post("/auth/refresh", { refresh_token }),
   logout: () => api.post("/auth/logout"),
 };

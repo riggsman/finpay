@@ -42,6 +42,29 @@ def request_reset(db: Session, identifier: str) -> PasswordResetToken | None:
     return entry
 
 
+def deliver_reset_code(db: Session, user: User, code: str) -> bool:
+    """Email the password-reset OTP to the user's address."""
+    if not user or not user.email:
+        return False
+    from app.notifications.email import send_email
+    from app.services import catalog_service
+
+    from_name = catalog_service.get_str(db, "email_from_name", "FinPay")
+    ttl_min = max(1, settings.RESET_CODE_TTL_SECONDS // 60)
+    return send_email(
+        user.email,
+        f"Your {from_name} password reset code",
+        (
+            f"Hi {user.first_name or 'there'},\n\n"
+            f"Your password reset code is: {code}\n\n"
+            f"It expires in {ttl_min} minute(s).\n"
+            "If you did not request a reset, you can ignore this email.\n\n"
+            f"— {from_name}"
+        ),
+        from_name=from_name,
+    )
+
+
 def verify_code(db: Session, identifier: str, code: str) -> tuple[str, int]:
     """Validate the code and issue a short-lived reset token."""
     user = _find_user(db, identifier)

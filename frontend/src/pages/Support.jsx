@@ -2,6 +2,40 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supportApi } from "../api/support";
 
+async function capturePageScreenshot() {
+  try {
+    const html2canvas = (await import("html2canvas")).default;
+    const canvas = await html2canvas(document.body, {
+      useCORS: true,
+      allowTaint: true,
+      logging: false,
+      scale: Math.min(window.devicePixelRatio || 1, 1.25),
+      windowWidth: document.documentElement.scrollWidth,
+      windowHeight: document.documentElement.scrollHeight,
+    });
+    return canvas.toDataURL("image/jpeg", 0.72);
+  } catch {
+    return null;
+  }
+}
+
+function buildIssueContext() {
+  return {
+    path: window.location.pathname,
+    search: window.location.search,
+    hash: window.location.hash,
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio || 1,
+    },
+    language: navigator.language,
+    platform: navigator.platform,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    captured_at: new Date().toISOString(),
+  };
+}
+
 export default function Support() {
   const navigate = useNavigate();
   const [tickets, setTickets] = useState([]);
@@ -9,6 +43,7 @@ export default function Support() {
   const [form, setForm] = useState({ subject: "", category: "general", message: "" });
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [captureNote, setCaptureNote] = useState(null);
 
   function refresh() {
     supportApi.listTickets().then(setTickets).catch(() => {});
@@ -20,13 +55,27 @@ export default function Support() {
   async function createTicket(e) {
     e.preventDefault();
     setError(null);
+    setCaptureNote(null);
     setBusy(true);
     try {
-      await supportApi.createTicket(form.subject, form.category, form.message);
+      setCaptureNote("Capturing page screenshot…");
+      const screenshot_base64 = await capturePageScreenshot();
+      setCaptureNote(screenshot_base64 ? "Sending ticket with screenshot…" : "Sending ticket…");
+      await supportApi.createTicket({
+        subject: form.subject,
+        category: form.category,
+        message: form.message,
+        page_url: window.location.href,
+        user_agent: navigator.userAgent,
+        context: buildIssueContext(),
+        screenshot_base64: screenshot_base64 || undefined,
+      });
       setForm({ subject: "", category: "general", message: "" });
+      setCaptureNote(null);
       refresh();
     } catch (err) {
       setError(err.message);
+      setCaptureNote(null);
     } finally {
       setBusy(false);
     }
@@ -45,6 +94,10 @@ export default function Support() {
         <div>
           <div className="card">
             <h2>Open a ticket</h2>
+            <p className="muted small">
+              When you submit, FinPay automatically captures a screenshot of your current screen
+              and sends page context so support can see exactly what you saw.
+            </p>
             <form onSubmit={createTicket}>
               <label>Subject</label>
               <input value={form.subject} onChange={(e) => setForm({ ...form, subject: e.target.value })} required />
@@ -63,8 +116,9 @@ export default function Support() {
                 required
                 style={{ width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid var(--border)", background: "var(--bg-soft)", color: "var(--text)", fontFamily: "inherit", fontSize: 15 }}
               />
+              {captureNote && <div className="muted small mt">{captureNote}</div>}
               {error && <div className="alert alert-error">{error}</div>}
-              <div className="mt"><button className="btn-primary" disabled={busy}>Submit ticket</button></div>
+              <div className="mt"><button className="btn-primary" disabled={busy}>{busy ? "Submitting…" : "Submit ticket"}</button></div>
             </form>
           </div>
 
@@ -95,7 +149,10 @@ export default function Support() {
               <div className="txn clickable" key={t.id} onClick={() => navigate(`/support/tickets/${t.id}`)}>
                 <div className="meta">
                   <span>{t.subject}</span>
-                  <span className="muted small">{t.reference} · {t.category}</span>
+                  <span className="muted small">
+                    {t.reference} · {t.category}
+                    {t.has_screenshot ? " · screenshot attached" : ""}
+                  </span>
                 </div>
                 <span className={`badge ${t.status === "CLOSED" ? "" : t.status === "RESOLVED" ? "SUCCESS" : "PROCESSING"}`}>{t.status}</span>
               </div>

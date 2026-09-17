@@ -1,19 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { authApi } from "../api/auth";
+import AppShell from "../components/AppShell";
 import { securityApi } from "../api/security";
 import { devicesApi } from "../api/devices";
 import { registerDevice, isConfigured } from "../services/pushService";
-import { useAuth } from "../store/AuthContext";
-
-function Section({ title, children }) {
-  return (
-    <div className="card mt" style={{ maxWidth: 620 }}>
-      <h2>{title}</h2>
-      {children}
-    </div>
-  );
-}
+import { useNotifications } from "../store/NotificationContext";
 
 function Note({ msg }) {
   if (!msg) return null;
@@ -21,12 +12,78 @@ function Note({ msg }) {
   return <div className={`alert ${cls}`}>{msg.text}</div>;
 }
 
+function money(minor) {
+  return (Number(minor) / 100).toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+}
+
+function toMinor(major) {
+  const n = parseFloat(major);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.round(n * 100);
+}
+
+const PANELS = {
+  password: "Change password",
+  pin: "Transaction PIN",
+  limits: "Limit request",
+  notifications: "Notifications",
+};
+
+const MENU = [
+  {
+    id: "password",
+    label: "Change password",
+    hint: "Update your sign-in password",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <rect x="5" y="10" width="14" height="10" rx="2" />
+        <path d="M8 10V8a4 4 0 018 0v2" />
+      </svg>
+    ),
+  },
+  {
+    id: "pin",
+    label: "Transaction PIN",
+    hint: "PIN used to confirm payments",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M4 8h16v10H4z" />
+        <path d="M8 12h.01M12 12h.01M16 12h.01" />
+      </svg>
+    ),
+  },
+  {
+    id: "limits",
+    label: "Limit request",
+    hint: "Request a temporary raise",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M4 19V5M4 19h16" />
+        <path d="M8 15v-4M12 15V9M16 15v-7" />
+      </svg>
+    ),
+  },
+  {
+    id: "notifications",
+    label: "Notifications",
+    hint: "Push alerts on this device",
+    icon: (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+        <path d="M6 16v-5a6 6 0 0112 0v5" />
+        <path d="M5 16h14" />
+        <path d="M10 19a2 2 0 004 0" />
+      </svg>
+    ),
+  },
+];
+
 export default function Security() {
   const navigate = useNavigate();
-  const { user, login, auth } = useAuth();
-
-  const [profile, setProfile] = useState({ first_name: "", last_name: "", email: "" });
-  const [profileMsg, setProfileMsg] = useState(null);
+  const { limitsRevision } = useNotifications();
+  const [panel, setPanel] = useState(null);
 
   const [pw, setPw] = useState({ current_password: "", new_password: "" });
   const [pwMsg, setPwMsg] = useState(null);
@@ -34,8 +91,11 @@ export default function Security() {
   const [pin, setPin] = useState({ current_pin: "", new_pin: "" });
   const [pinMsg, setPinMsg] = useState(null);
 
-  const [limits, setLimits] = useState({ per_txn_limit: 0, daily_limit: 0 });
-  const [limitsMsg, setLimitsMsg] = useState(null);
+  const [limits, setLimits] = useState(null);
+  const [requests, setRequests] = useState([]);
+  const [limitForm, setLimitForm] = useState({ per_txn: "", daily: "", reason: "" });
+  const [limitMsg, setLimitMsg] = useState(null);
+  const [limitBusy, setLimitBusy] = useState(false);
 
   const [sessions, setSessions] = useState([]);
   const [sessMsg, setSessMsg] = useState(null);
@@ -44,20 +104,10 @@ export default function Security() {
   const [devices, setDevices] = useState([]);
   const [pushMsg, setPushMsg] = useState(null);
 
-  const [activity, setActivity] = useState([]);
-
-  useEffect(() => {
-    authApi.me().then((me) =>
-      setProfile({ first_name: me.first_name || "", last_name: me.last_name || "", email: me.email || "" })
-    ).catch(() => {});
-    securityApi.getLimits().then((l) =>
-      setLimits({ per_txn_limit: l.per_txn_limit / 100, daily_limit: l.daily_limit / 100 })
-    ).catch(() => {});
-    refreshSessions();
-    devicesApi.config().then((c) => setFcmEnabled(c.fcm_enabled)).catch(() => {});
-    refreshDevices();
-    securityApi.activity(30).then(setActivity).catch(() => {});
-  }, []);
+  function refreshLimits() {
+    securityApi.getLimits().then(setLimits).catch(() => {});
+    securityApi.listLimitRequests().then(setRequests).catch(() => {});
+  }
 
   function refreshSessions() {
     securityApi.listSessions().then(setSessions).catch(() => {});
@@ -67,29 +117,23 @@ export default function Security() {
     devicesApi.list().then(setDevices).catch(() => {});
   }
 
+  useEffect(() => {
+    refreshLimits();
+    refreshSessions();
+    devicesApi.config().then((c) => setFcmEnabled(c.fcm_enabled)).catch(() => {});
+    refreshDevices();
+  }, [limitsRevision]);
+
   async function enablePush() {
     setPushMsg(null);
     const res = await registerDevice();
     refreshDevices();
     if (!isConfigured()) {
-      setPushMsg("Push is not configured in this build. Device registered without a push token.");
+      setPushMsg("Push is not configured in this build. This device was registered without notifications.");
     } else if (res.push) {
-      setPushMsg("Push enabled on this device.");
+      setPushMsg("Push notifications enabled on this device.");
     } else {
-      setPushMsg("Device registered. Allow notifications to receive push.");
-    }
-  }
-
-  async function saveProfile(e) {
-    e.preventDefault();
-    setProfileMsg(null);
-    try {
-      const me = await securityApi.updateProfile(profile);
-      setProfileMsg({ ok: true, text: "Profile updated." });
-      // Keep the cached user in sync for the dashboard greeting.
-      if (auth) login({ ...auth, user: { ...auth.user, ...me } });
-    } catch (err) {
-      setProfileMsg({ ok: false, text: err.message });
+      setPushMsg("Device registered. Allow notifications in the browser prompt to turn push on.");
     }
   }
 
@@ -118,18 +162,29 @@ export default function Security() {
     }
   }
 
-  async function saveLimits(e) {
+  async function submitLimitRequest(e) {
     e.preventDefault();
-    setLimitsMsg(null);
+    setLimitMsg(null);
+    const per = toMinor(limitForm.per_txn);
+    const daily = toMinor(limitForm.daily);
+    if (!per || !daily) {
+      setLimitMsg({ ok: false, text: "Enter valid per-transaction and daily limits in XAF." });
+      return;
+    }
+    setLimitBusy(true);
     try {
-      const l = await securityApi.updateLimits(
-        Math.round(limits.per_txn_limit * 100),
-        Math.round(limits.daily_limit * 100)
-      );
-      setLimits({ per_txn_limit: l.per_txn_limit / 100, daily_limit: l.daily_limit / 100 });
-      setLimitsMsg({ ok: true, text: "Limits updated." });
+      await securityApi.createLimitRequest({
+        requested_per_txn_limit: per,
+        requested_daily_limit: daily,
+        reason: limitForm.reason.trim() || null,
+      });
+      setLimitForm({ per_txn: "", daily: "", reason: "" });
+      setLimitMsg({ ok: true, text: "Limit increase request submitted for admin review." });
+      refreshLimits();
     } catch (err) {
-      setLimitsMsg({ ok: false, text: err.message });
+      setLimitMsg({ ok: false, text: err.message });
+    } finally {
+      setLimitBusy(false);
     }
   }
 
@@ -144,126 +199,307 @@ export default function Security() {
     }
   }
 
+  const pendingLimit = requests.some((r) => r.status === "PENDING");
+  const grant = limits?.active_grant;
+  const title = panel ? PANELS[panel] : "Security";
+  const backTo = panel ? () => setPanel(null) : "/profile";
+
+  if (panel === "password") {
+    return (
+      <AppShell title={title} backTo={backTo} showNav className="dash-screen">
+        <p className="screen-desc">Choose a strong password you do not reuse elsewhere.</p>
+        <div className="dash-section">
+          <form className="form-card" onSubmit={changePassword}>
+            <label>Current password</label>
+            <input
+              type="password"
+              value={pw.current_password}
+              onChange={(e) => setPw({ ...pw, current_password: e.target.value })}
+              required
+            />
+            <label>New password</label>
+            <input
+              type="password"
+              value={pw.new_password}
+              minLength={8}
+              onChange={(e) => setPw({ ...pw, new_password: e.target.value })}
+              required
+            />
+            <Note msg={pwMsg} />
+            <div className="mt">
+              <button className="btn-primary" disabled={pw.new_password.length < 8}>
+                Update password
+              </button>
+            </div>
+          </form>
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (panel === "pin") {
+    return (
+      <AppShell title={title} backTo={backTo} showNav className="dash-screen">
+        <p className="screen-desc">This PIN confirms withdrawals, transfers, and bill payments.</p>
+        <div className="dash-section">
+          <form className="form-card" onSubmit={changePin}>
+            <label>
+              Current PIN <span className="muted small">(dev default: 1234)</span>
+            </label>
+            <input
+              type="password"
+              value={pin.current_pin}
+              inputMode="numeric"
+              maxLength={6}
+              onChange={(e) => setPin({ ...pin, current_pin: e.target.value })}
+            />
+            <label>New PIN</label>
+            <input
+              type="password"
+              value={pin.new_pin}
+              inputMode="numeric"
+              maxLength={6}
+              onChange={(e) => setPin({ ...pin, new_pin: e.target.value })}
+              required
+            />
+            <Note msg={pinMsg} />
+            <div className="mt">
+              <button className="btn-primary" disabled={pin.new_pin.length < 4}>
+                Update PIN
+              </button>
+            </div>
+          </form>
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (panel === "limits") {
+    return (
+      <AppShell title={title} backTo={backTo} showNav className="dash-screen">
+        <p className="screen-desc">
+          Request a temporary raise. Approvals are reviewed separately from KYC.
+        </p>
+
+        <div className="dash-section">
+          <div className="dash-section-head"><h3>Current limits</h3></div>
+          <div className="limits-card">
+            <div className="limit-tile">
+              <span className="muted small">Per transaction</span>
+              <strong>{limits ? `${money(limits.per_txn_limit)} XAF` : "—"}</strong>
+            </div>
+            <div className="limit-tile">
+              <span className="muted small">Daily</span>
+              <strong>{limits ? `${money(limits.daily_limit)} XAF` : "—"}</strong>
+            </div>
+          </div>
+          {limits && (
+            <p className="muted small" style={{ marginTop: 8 }}>
+              Used today: {money(limits.spent_today)} XAF · Remaining today:{" "}
+              {money(limits.remaining_daily)} XAF
+            </p>
+          )}
+          {grant && (
+            <div className="alert alert-info mt">
+              Raised limit active until{" "}
+              {grant.expires_at ? new Date(grant.expires_at).toLocaleString() : "—"}.
+            </div>
+          )}
+        </div>
+
+        <div className="dash-section">
+          <div className="dash-section-head"><h3>New request</h3></div>
+          {pendingLimit || grant ? (
+            <p className="muted small">
+              {pendingLimit
+                ? "You already have a pending request. Wait for an admin decision."
+                : "You already have an active raised limit. Request again after it expires or is fully used."}
+            </p>
+          ) : (
+            <form className="form-card" onSubmit={submitLimitRequest}>
+              <label>Requested per-transaction limit (XAF)</label>
+              <input
+                type="number"
+                min="1"
+                step="0.01"
+                value={limitForm.per_txn}
+                onChange={(e) => setLimitForm({ ...limitForm, per_txn: e.target.value })}
+                placeholder="e.g. 1000000"
+                required
+              />
+              <label>Requested daily limit (XAF)</label>
+              <input
+                type="number"
+                min="1"
+                step="0.01"
+                value={limitForm.daily}
+                onChange={(e) => setLimitForm({ ...limitForm, daily: e.target.value })}
+                placeholder="e.g. 2000000"
+                required
+              />
+              <label>Reason</label>
+              <textarea
+                rows={3}
+                value={limitForm.reason}
+                onChange={(e) => setLimitForm({ ...limitForm, reason: e.target.value })}
+                placeholder="Why do you need higher limits?"
+              />
+              <Note msg={limitMsg} />
+              <div className="mt">
+                <button className="btn-primary" disabled={limitBusy}>
+                  {limitBusy ? "Submitting…" : "Submit request"}
+                </button>
+              </div>
+            </form>
+          )}
+          {limitMsg && (pendingLimit || grant) && (
+            <div className={`alert ${limitMsg.ok ? "alert-success" : "alert-error"} mt`}>
+              {limitMsg.text}
+            </div>
+          )}
+        </div>
+
+        <div className="dash-section">
+          <div className="dash-section-head"><h3>Request history</h3></div>
+          {requests.length === 0 ? (
+            <div className="empty">No limit increase requests yet.</div>
+          ) : (
+            <div className="activity-list">
+              {requests.map((r) => (
+                <div className="activity-item static" key={r.id}>
+                  <div className="activity-copy">
+                    <strong>
+                      {money(r.requested_per_txn_limit)} / {money(r.requested_daily_limit)} XAF
+                    </strong>
+                    <span>
+                      {new Date(r.created_at).toLocaleString()}
+                      {r.rejection_reason ? ` · ${r.rejection_reason}` : ""}
+                    </span>
+                  </div>
+                  <span
+                    className={`badge ${
+                      r.status === "APPROVED"
+                        ? "SUCCESS"
+                        : r.status === "REJECTED"
+                          ? "FAILED"
+                          : "PENDING"
+                    }`}
+                  >
+                    {r.status}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </AppShell>
+    );
+  }
+
+  if (panel === "notifications") {
+    return (
+      <AppShell title={title} backTo={backTo} showNav className="dash-screen">
+        <p className="screen-desc">
+          {fcmEnabled
+            ? "Allow FinPay to send alerts on this browser."
+            : "Push delivery may be unavailable on the server. You can still register this device."}
+        </p>
+
+        <div className="dash-section">
+          <div className="dash-section-head"><h3>This device</h3></div>
+          {devices.length === 0 ? (
+            <div className="empty">No devices registered yet.</div>
+          ) : (
+            <div className="activity-list">
+              {devices.map((d, index) => (
+                <div className="activity-item static" key={d.id}>
+                  <div className="activity-copy">
+                    <strong>
+                      {String(d.device_type || "web").charAt(0).toUpperCase()
+                        + String(d.device_type || "web").slice(1)}{" "}
+                      device {index + 1}
+                    </strong>
+                    <span>Last active {new Date(d.last_seen_at).toLocaleString()}</span>
+                  </div>
+                  <span className={`badge ${d.push_enabled ? "SUCCESS" : "FAILED"}`}>
+                    {d.push_enabled ? "ON" : "OFF"}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <Note msg={pushMsg} />
+          <div className="mt">
+            <button type="button" className="btn-primary" onClick={enablePush}>
+              Enable push on this device
+            </button>
+          </div>
+        </div>
+
+        <div className="dash-section">
+          <div className="dash-section-head"><h3>In-app inbox</h3></div>
+          <p className="muted small" style={{ margin: "0 0 10px" }}>
+            View alerts for payments, limits, KYC, and support.
+          </p>
+          <button type="button" className="btn-ghost" onClick={() => navigate("/notifications")}>
+            Open notifications →
+          </button>
+        </div>
+
+        <div className="dash-section">
+          <div className="dash-section-head"><h3>Active sessions</h3></div>
+          <p className="muted small" style={{ margin: "0 0 10px" }}>
+            You have {sessions.length} active session(s).
+          </p>
+          <Note msg={sessMsg} />
+          <button type="button" className="btn-ghost" onClick={revokeAll}>
+            Sign out all other devices
+          </button>
+        </div>
+      </AppShell>
+    );
+  }
+
   return (
-    <div className="container">
-      <div className="topbar">
-        <div className="brand"><span className="dot" /> FinPay</div>
-        <button className="btn-ghost" onClick={() => navigate("/dashboard")}>← Dashboard</button>
+    <AppShell title="Security" backTo="/profile" showNav className="dash-screen">
+      <p className="screen-desc">Choose a setting to manage. Only one screen opens at a time.</p>
+
+      <div className="dash-section">
+        <div className="settings-list">
+          {MENU.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className="settings-item"
+              onClick={() => setPanel(item.id)}
+            >
+              <span className="settings-left">
+                <span className="settings-ico">{item.icon}</span>
+                <span className="settings-copy">
+                  <strong>{item.label}</strong>
+                  <span className="muted small">{item.hint}</span>
+                </span>
+              </span>
+              <span className="chev">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M9 18l6-6-6-6" />
+                </svg>
+              </span>
+            </button>
+          ))}
+        </div>
       </div>
 
-      <h1>Profile &amp; Security</h1>
-      <p className="muted">Manage your profile, credentials, limits, and sessions.</p>
-
-      <Section title="Profile">
-        <form onSubmit={saveProfile}>
-          <div className="row">
-            <div>
-              <label>First name</label>
-              <input value={profile.first_name} onChange={(e) => setProfile({ ...profile, first_name: e.target.value })} />
-            </div>
-            <div>
-              <label>Last name</label>
-              <input value={profile.last_name} onChange={(e) => setProfile({ ...profile, last_name: e.target.value })} />
-            </div>
-          </div>
-          <label>Email</label>
-          <input type="email" value={profile.email} onChange={(e) => setProfile({ ...profile, email: e.target.value })} />
-          <Note msg={profileMsg} />
-          <div className="mt"><button className="btn-primary">Save profile</button></div>
-        </form>
-      </Section>
-
-      <Section title="Change password">
-        <form onSubmit={changePassword}>
-          <label>Current password</label>
-          <input type="password" value={pw.current_password} onChange={(e) => setPw({ ...pw, current_password: e.target.value })} />
-          <label>New password</label>
-          <input type="password" value={pw.new_password} minLength={8} onChange={(e) => setPw({ ...pw, new_password: e.target.value })} />
-          <Note msg={pwMsg} />
-          <div className="mt"><button className="btn-primary" disabled={pw.new_password.length < 8}>Update password</button></div>
-        </form>
-      </Section>
-
-      <Section title="Transaction PIN">
-        <form onSubmit={changePin}>
-          <label>Current PIN <span className="muted small">(dev default: 1234)</span></label>
-          <input type="password" value={pin.current_pin} inputMode="numeric" maxLength={6} onChange={(e) => setPin({ ...pin, current_pin: e.target.value })} />
-          <label>New PIN</label>
-          <input type="password" value={pin.new_pin} inputMode="numeric" maxLength={6} onChange={(e) => setPin({ ...pin, new_pin: e.target.value })} />
-          <Note msg={pinMsg} />
-          <div className="mt"><button className="btn-primary" disabled={pin.new_pin.length < 4}>Update PIN</button></div>
-        </form>
-      </Section>
-
-      <Section title="Transaction limits">
-        <form onSubmit={saveLimits}>
-          <div className="row">
-            <div>
-              <label>Per-transaction limit (XAF)</label>
-              <input type="number" min="1" value={limits.per_txn_limit} onChange={(e) => setLimits({ ...limits, per_txn_limit: parseFloat(e.target.value || "0") })} />
-            </div>
-            <div>
-              <label>Daily limit (XAF)</label>
-              <input type="number" min="1" value={limits.daily_limit} onChange={(e) => setLimits({ ...limits, daily_limit: parseFloat(e.target.value || "0") })} />
-            </div>
-          </div>
-          <Note msg={limitsMsg} />
-          <div className="mt"><button className="btn-primary">Save limits</button></div>
-        </form>
-      </Section>
-
-      <Section title="Active sessions">
-        <p className="muted small">You have {sessions.length} active session(s).</p>
-        <Note msg={sessMsg} />
-        <div className="mt">
-          <button className="btn-ghost" onClick={revokeAll}>Sign out all other devices</button>
-        </div>
-      </Section>
-
-      <Section title="Notifications & devices">
-        <p className="muted small">
-          Push delivery is <strong style={{ color: fcmEnabled ? "var(--accent)" : "var(--muted)" }}>
-            {fcmEnabled ? "enabled" : "not configured"}
-          </strong> on the server.
-        </p>
-        {devices.length === 0 ? (
-          <div className="empty">No devices registered.</div>
-        ) : (
-          devices.map((d) => (
-            <div className="txn" key={d.id}>
-              <div className="meta">
-                <span>{d.device_type} · {d.device_id.slice(0, 16)}…</span>
-                <span className="muted small">last seen {new Date(d.last_seen_at).toLocaleString()}</span>
-              </div>
-              <span className={`badge ${d.has_push_token ? "SUCCESS" : ""}`}>
-                {d.has_push_token ? "PUSH ON" : "NO TOKEN"}
-              </span>
-            </div>
-          ))
-        )}
-        <Note msg={pushMsg} />
-        <div className="mt">
-          <button className="btn-ghost" onClick={enablePush}>Enable push on this device</button>
-        </div>
-      </Section>
-
-      <Section title="Recent activity">
-        {activity.length === 0 ? (
-          <div className="empty">No recent activity.</div>
-        ) : (
-          activity.map((a) => (
-            <div className="txn" key={a.id}>
-              <div className="meta">
-                <span>{a.action.replaceAll("_", " ")}</span>
-                <span className="muted small">
-                  {new Date(a.created_at).toLocaleString()}{a.ip ? ` · ${a.ip}` : ""}
-                </span>
-              </div>
-              <span className={`badge ${a.result === "SUCCESS" ? "SUCCESS" : "FAILED"}`}>{a.result}</span>
-            </div>
-          ))
-        )}
-      </Section>
-    </div>
+      <div className="dash-section">
+        <button
+          type="button"
+          className="btn-ghost"
+          style={{ width: "100%" }}
+          onClick={() => navigate("/profile/activity")}
+        >
+          View account activity →
+        </button>
+      </div>
+    </AppShell>
   );
 }

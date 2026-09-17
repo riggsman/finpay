@@ -1,88 +1,62 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { dashboardApi, notificationsApi, recoveryApi, transactionsApi, walletApi } from "../api/wallet";
+import AppShell from "../components/AppShell";
+import BalanceCard from "../components/BalanceCard";
+import { dashboardApi, recoveryApi, transactionsApi } from "../api/wallet";
 import { kycApi } from "../api/kyc";
 import { socketService } from "../services/socketService";
 import { useAuth } from "../store/AuthContext";
+import { useNotifications } from "../store/NotificationContext";
+import { CREDIT_TYPES, transactionStatusClass, transactionTitle } from "../utils/transactions";
 
-function formatMoney(minor, currency) {
-  return `${(minor / 100).toLocaleString(undefined, {
+function money(minor) {
+  return (Number(minor) / 100).toLocaleString(undefined, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
-  })}`;
+  });
 }
 
-const CREDIT_TYPES = new Set(["ADD_MONEY", "TRANSFER_RECEIVED"]);
-
-const CONN_LABEL = {
-  CONNECTED: { cls: "live", text: "Live" },
-  CONNECTING: { cls: "reconnecting", text: "Connecting…" },
-  RECONNECTING: { cls: "reconnecting", text: "Reconnecting…" },
-  DISCONNECTED: { cls: "down", text: "Offline" },
-  AUTHENTICATION_FAILED: { cls: "down", text: "Auth failed" },
-};
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
+}
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
+  const { unread, pendingRequests } = useNotifications();
   const [wallet, setWallet] = useState({ balance: 0, currency: "XAF" });
   const [transactions, setTransactions] = useState([]);
-  const [notifications, setNotifications] = useState([]);
-  const [unread, setUnread] = useState(0);
-  const [connState, setConnState] = useState(socketService.getConnectionState());
-  const [amount, setAmount] = useState("100");
-  const [busy, setBusy] = useState(false);
-  const [flashId, setFlashId] = useState(null);
-  const [toast, setToast] = useState(null);
   const [kycStatus, setKycStatus] = useState(null);
-  const flashRef = useRef(null);
+  const [hideBal, setHideBal] = useState(false);
 
   const refresh = useCallback(async () => {
-    const [summary, txns, notifs, count] = await Promise.all([
+    const [summary, txns] = await Promise.all([
       dashboardApi.summary(),
-      transactionsApi.list(10),
-      notificationsApi.list(10),
-      notificationsApi.unreadCount(),
+      transactionsApi.list(3),
     ]);
     setWallet(summary.wallet);
     setTransactions(txns);
-    setNotifications(notifs);
-    setUnread(count.unread);
   }, []);
 
   useEffect(() => {
-    // Application-open recovery: settle any transactions left pending by a
-    // provider timeout, then refresh (SRS offline/recovery).
     recoveryApi.reconcile().catch(() => {}).finally(() => refresh().catch(() => {}));
     kycApi.get().then((k) => setKycStatus(k.status)).catch(() => {});
   }, [refresh]);
 
-  // Wire realtime events to live UI updates (SRS section 59).
   useEffect(() => {
-    const unsub = socketService.onStateChange(setConnState);
-
     const onWallet = (evt) => {
       setWallet((w) => ({ ...w, balance: evt.data.balance, currency: evt.data.currency }));
     };
-    const onTxn = () => {
-      transactionsApi.list(10).then(setTransactions).catch(() => {});
-    };
+    const onTxn = () => transactionsApi.list(3).then(setTransactions).catch(() => {});
     const onNotif = (evt) => {
-      setUnread((u) => u + 1);
-      setToast(evt.data.title + " — " + evt.data.message);
-      setTimeout(() => setToast(null), 4000);
-      // Refresh transactions too so received transfers appear live.
-      transactionsApi.list(10).then(setTransactions).catch(() => {});
-      notificationsApi.list(10).then((list) => {
-        setNotifications(list);
-        if (list[0]) {
-          setFlashId(list[0].id);
-          clearTimeout(flashRef.current);
-          flashRef.current = setTimeout(() => setFlashId(null), 1500);
-        }
-      });
+      transactionsApi.list(3).then(setTransactions).catch(() => {});
+      if (evt?.data?.type === "KYC_APPROVED" || evt?.data?.type === "KYC_REJECTED") {
+        setKycStatus(evt.data.type === "KYC_APPROVED" ? "APPROVED" : "REJECTED");
+      }
     };
-
     const onKyc = (evt) => {
       if (evt?.data?.status) setKycStatus(evt.data.status);
     };
@@ -91,188 +65,220 @@ export default function Dashboard() {
     socketService.on("TRANSACTION_SUCCESS", onTxn);
     socketService.on("notification:new", onNotif);
     socketService.on("KYC_STATUS_UPDATED", onKyc);
-
     return () => {
       socketService.off("WALLET_BALANCE_UPDATED", onWallet);
       socketService.off("TRANSACTION_SUCCESS", onTxn);
       socketService.off("notification:new", onNotif);
       socketService.off("KYC_STATUS_UPDATED", onKyc);
-      unsub();
     };
   }, []);
 
-  async function addMoney() {
-    const minor = Math.round(parseFloat(amount || "0") * 100);
-    if (!minor || minor <= 0) return;
-    setBusy(true);
-    try {
-      // Client-generated idempotency key protects against double taps / retries.
-      const key = `add-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      await walletApi.addMoney(minor, "card", key);
-      // The wallet + notification updates arrive via Socket.IO; also refresh as a
-      // recovery path in case an event was missed.
-      setTimeout(() => refresh().catch(() => {}), 600);
-    } catch (e) {
-      setToast(e.message);
-      setTimeout(() => setToast(null), 4000);
-    } finally {
-      setBusy(false);
+  const initials = useMemo(() => {
+    const a = (user?.first_name || "?").slice(0, 1);
+    const b = (user?.last_name || "").slice(0, 1);
+    return `${a}${b}`.toUpperCase();
+  }, [user]);
+
+  const kycBanner = (() => {
+    if (!kycStatus || kycStatus === "APPROVED") {
+      return (
+        <div className="kyc-banner">
+          <span className="kyc-ico">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 6L9 17l-5-5" /></svg>
+          </span>
+          <div className="kyc-copy">
+            <strong>KYC Verified</strong>
+            <span>Identity confirmed</span>
+          </div>
+          <span className="kyc-pill">Active</span>
+        </div>
+      );
     }
-  }
-
-  async function markAllRead() {
-    await notificationsApi.markAllRead();
-    setUnread(0);
-    notificationsApi.list(10).then(setNotifications).catch(() => {});
-  }
-
-  function signOut() {
-    logout();
-    navigate("/");
-  }
-
-  const conn = CONN_LABEL[connState] || CONN_LABEL.DISCONNECTED;
+    if (kycStatus === "UNDER_REVIEW") {
+      return (
+        <div className="kyc-banner pending">
+          <span className="kyc-ico">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></svg>
+          </span>
+          <div className="kyc-copy">
+            <strong>KYC under review</strong>
+            <span>We’ll notify you when verification completes</span>
+          </div>
+          <span className="kyc-pill">Pending</span>
+        </div>
+      );
+    }
+    if (kycStatus === "REJECTED") {
+      return (
+        <button type="button" className="kyc-banner rejected kyc-banner-action" onClick={() => navigate("/kyc")}>
+          <span className="kyc-ico">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12" /></svg>
+          </span>
+          <div className="kyc-copy">
+            <strong>Verification failed</strong>
+            <span>Tap to review and resubmit</span>
+          </div>
+          <span className="kyc-pill">Action</span>
+        </button>
+      );
+    }
+    return (
+      <button type="button" className="kyc-banner pending kyc-banner-action" onClick={() => navigate("/kyc")}>
+        <span className="kyc-ico">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3l9 4v6c0 5-3.8 9.6-9 11-5.2-1.4-9-6-9-11V7l9-4z" /></svg>
+        </span>
+        <div className="kyc-copy">
+          <strong>Verify your identity</strong>
+          <span>Complete KYC to unlock full account features</span>
+        </div>
+        <span className="kyc-pill">Start</span>
+      </button>
+    );
+  })();
 
   return (
-    <div className="container">
-      <div className="topbar">
-        <div className="brand">
-          <span className="dot" />
-          FinPay
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          <span className={`pill ${conn.cls}`}>
-            <span className="status-dot" />
-            {conn.text}
-          </span>
-          <span className="bell pill">
-            🔔 {unread > 0 && <span className="count">{unread}</span>}
-          </span>
-          <button className="btn-accent" onClick={() => navigate("/services")}>Pay bills</button>
-          {user?.is_admin && (
-            <button className="btn-ghost" onClick={() => navigate("/admin")}>Back Office</button>
-          )}
-          <button className="btn-ghost" onClick={() => navigate("/security")}>Settings</button>
-          <button className="btn-ghost" onClick={() => navigate("/support")}>Support</button>
-          <button className="btn-ghost" onClick={signOut}>Sign out</button>
-        </div>
-      </div>
-
-      {toast && <div className="alert alert-success">{toast}</div>}
-
-      {kycStatus && kycStatus !== "APPROVED" && (
-        <div className="alert alert-info" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <span>
-            {kycStatus === "UNDER_REVIEW"
-              ? "Your identity verification is under review."
-              : kycStatus === "REJECTED"
-              ? "Identity verification failed. Please resubmit."
-              : "Verify your identity to raise your transaction limits."}
-          </span>
-          {kycStatus !== "UNDER_REVIEW" && (
-            <button className="btn-accent" style={{ flex: "0 0 auto" }} onClick={() => navigate("/kyc")}>
-              {kycStatus === "REJECTED" ? "Resubmit KYC" : "Verify identity"}
+    <AppShell showNav wide className="dash-screen">
+      <div className="dash-pad">
+        <div className="dash-greeting">
+          <div className="dash-user">
+            <div className="dash-avatar" aria-hidden="true">{initials}</div>
+            <div>
+              <div className="hello">{greeting()}</div>
+              <div className="name">{user?.first_name || "there"} {user?.last_name || ""}</div>
+            </div>
+          </div>
+          <div className="dash-header-actions">
+            <button
+              type="button"
+              className="dash-icon-btn"
+              aria-label="Support"
+              onClick={() => navigate("/support")}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <circle cx="12" cy="12" r="9" />
+                <path d="M9.5 9.5a2.5 2.5 0 114 2c-.7.7-1.5 1.2-1.5 2.5M12 17h.01" />
+              </svg>
             </button>
-          )}
-        </div>
-      )}
-
-      <p className="muted">
-        Welcome back, <strong style={{ color: "var(--text)" }}>{user?.first_name}</strong>.
-      </p>
-
-      <div className="grid mt">
-        <div className="card balance-card">
-          <div className="muted small">Wallet balance</div>
-          <div className="balance">
-            {formatMoney(wallet.balance, wallet.currency)}
-            <span className="cur">{wallet.currency}</span>
+            <button
+              type="button"
+              className="dash-icon-btn bell"
+              aria-label={unread > 0 ? `Notifications, ${unread} unread` : "Notifications"}
+              onClick={() => navigate("/notifications")}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M6 9a6 6 0 0112 0c0 7 3 7 3 9H3c0-2 3-2 3-9" />
+                <path d="M10 20a2 2 0 004 0" />
+              </svg>
+              {unread > 0 && <span className="count">{unread > 99 ? "99+" : unread}</span>}
+            </button>
           </div>
-
-          <div className="mt-lg">
-            <label>Add money (amount in {wallet.currency})</label>
-            <div className="row">
-              <input
-                type="number"
-                min="1"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-              />
-              <button
-                className="btn-accent"
-                style={{ flex: "0 0 auto", minWidth: 150 }}
-                onClick={addMoney}
-                disabled={busy}
-              >
-                {busy ? "Processing…" : "＋ Add money"}
-              </button>
-            </div>
-            <p className="muted small mt">
-              Runs the full engine: transaction → ledger → wallet → event →
-              notification → Socket.IO. Balance updates live.
-            </p>
-            <div className="row mt">
-              <button className="btn-ghost" onClick={() => navigate("/wallet/send")}>↗ Send</button>
-              <button className="btn-ghost" onClick={() => navigate("/wallet/requests")}>⇦ Request</button>
-              <button className="btn-ghost" onClick={() => navigate("/wallet/withdraw")}>↘ Withdraw</button>
-            </div>
-          </div>
-
-          <div className="mt-lg" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <h2 style={{ margin: 0 }}>Recent transactions</h2>
-            <span className="link small" onClick={() => navigate("/transactions")}>View all</span>
-          </div>
-          {transactions.length === 0 ? (
-            <div className="empty">No transactions yet.</div>
-          ) : (
-            transactions.map((t) => {
-              const isCredit = CREDIT_TYPES.has(t.type);
-              return (
-                <div className="txn clickable" key={t.id} onClick={() => navigate(`/transactions/${t.id}`)}>
-                  <div className="meta">
-                    <span>{t.type.replaceAll("_", " ")}</span>
-                    <span className="muted small">{t.reference}</span>
-                  </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div className="amt" style={{ color: isCredit ? "var(--accent)" : "var(--text)" }}>
-                      {isCredit ? "+" : "−"}{formatMoney(t.amount, t.currency)} {t.currency}
-                    </div>
-                    <span className={`badge ${t.status}`}>{t.status}</span>
-                  </div>
-                </div>
-              );
-            })
-          )}
         </div>
 
-        <div className="card">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <h2 style={{ margin: 0 }}>Notifications</h2>
-            {unread > 0 && (
-              <span className="link small" onClick={markAllRead}>
-                Mark all read
-              </span>
-            )}
+        <div className="dash-layout">
+          <div className="dash-main">
+            <BalanceCard
+              amount={money(wallet.balance)}
+              currency={wallet.currency}
+              hidden={hideBal}
+              onToggleHide={() => setHideBal((v) => !v)}
+              chip={`Acct ••${String(user?.id || 0).padStart(4, "0").slice(-4)}`}
+              meta="FinPay Wallet"
+              onAdd={() => navigate("/wallet/add")}
+              addLabel="+ Add money"
+            />
+
+            {kycBanner}
+
+            <div className="dash-section">
+              <div className="dash-section-head">
+                <h3>Services</h3>
+                <button type="button" onClick={() => navigate("/services")}>See all</button>
+              </div>
+              <div className="services-grid-4">
+                <button type="button" className="service-item" onClick={() => navigate("/wallet/send")}>
+                  <span className="service-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 19V5M5 12l7-7 7 7" /></svg></span>
+                  <span>Send</span>
+                </button>
+                <button
+                  type="button"
+                  className="service-item"
+                  onClick={() => navigate("/wallet/requests")}
+                  aria-label={
+                    pendingRequests > 0
+                      ? `Receive, ${pendingRequests} pending request${pendingRequests === 1 ? "" : "s"}`
+                      : "Receive"
+                  }
+                >
+                  <span className="service-ico green">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M12 5v14M5 12l7 7 7-7" /></svg>
+                    {pendingRequests > 0 && (
+                      <span className="count">{pendingRequests > 99 ? "99+" : pendingRequests}</span>
+                    )}
+                  </span>
+                  <span>Receive</span>
+                </button>
+                <button type="button" className="service-item" onClick={() => navigate("/services")}>
+                  <span className="service-ico amber"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><path d="M4 7h16v10H4z" /><path d="M4 11h16" /></svg></span>
+                  <span>Pay bills</span>
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="mt">
-            {notifications.length === 0 ? (
-              <div className="empty">You're all caught up.</div>
-            ) : (
-              notifications.map((n) => (
-                <div className={`notif ${flashId === n.id ? "flash" : ""}`} key={n.id}>
-                  <div style={{ display: "flex", justifyContent: "space-between" }}>
-                    <strong>{n.title}</strong>
-                    <span className={`badge ${n.priority === "HIGH" ? "SUCCESS" : ""}`}>
-                      {n.priority}
-                    </span>
-                  </div>
-                  <div className="muted small mt">{n.message}</div>
-                </div>
-              ))
-            )}
+
+          <div className="dash-side">
+            <div className="dash-section dash-activity">
+              <div className="dash-section-head">
+                <h3>Recent activity</h3>
+                <button type="button" onClick={() => navigate("/transactions")}>View all</button>
+              </div>
+              <div className="activity-list">
+                {transactions.length === 0 ? (
+                  <div className="empty">No activity yet.</div>
+                ) : (
+                  transactions.map((t) => {
+                    const isCredit = CREDIT_TYPES.has(t.type);
+                    const isFailed = t.status === "FAILED";
+                    return (
+                      <button
+                        type="button"
+                        className="activity-item"
+                        key={t.id}
+                        onClick={() => navigate(`/transactions/${t.id}`)}
+                      >
+                        <span className={`activity-ico ${isFailed ? "out" : isCredit ? "in" : "out"}`}>
+                          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            {isCredit ? (
+                              <path d="M12 19V5M5 12l7-7 7 7" />
+                            ) : (
+                              <path d="M12 5v14M5 12l7 7 7-7" />
+                            )}
+                          </svg>
+                        </span>
+                        <div className="activity-body">
+                          <div className="activity-top">
+                            <div className="activity-copy">
+                              <strong>{transactionTitle(t)}</strong>
+                              <span>{new Date(t.created_at).toLocaleString()}</span>
+                            </div>
+                            <span className={`badge activity-status ${transactionStatusClass(t.status)}`}>
+                              {t.status}
+                            </span>
+                          </div>
+                          <div className="activity-bottom">
+                            <div className={`activity-amt ${isFailed ? "failed" : isCredit ? "in" : "out"}`}>
+                              {isCredit ? "+" : "−"}{money(t.amount)}
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </AppShell>
   );
 }

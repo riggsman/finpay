@@ -17,6 +17,11 @@ class SupportTicket(Base):
     category: Mapped[str] = mapped_column(String(40), default="general", nullable=False)
     # OPEN, IN_PROGRESS, RESOLVED, CLOSED
     status: Mapped[str] = mapped_column(String(20), default="OPEN", nullable=False)
+    # Client context captured at submit time for admin triage.
+    page_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    context_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    screenshot_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[dt.datetime] = mapped_column(
         UTCDateTime(), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False
     )

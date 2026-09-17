@@ -16,6 +16,10 @@ from app.services import social_service
 router = APIRouter(tags=["social"])
 
 
+def _public(db: Session, req) -> MoneyRequestPublic:
+    return MoneyRequestPublic.model_validate(social_service.serialize_money_request(db, req))
+
+
 # --- Beneficiaries ---------------------------------------------------------
 
 @router.post("/beneficiaries", response_model=BeneficiaryPublic)
@@ -59,7 +63,7 @@ def create_request(
     req = social_service.create_request(
         db, current_user, payload.payer, payload.amount, payload.note
     )
-    return MoneyRequestPublic.model_validate(req)
+    return _public(db, req)
 
 
 @router.get("/money-requests", response_model=list[MoneyRequestPublic])
@@ -68,8 +72,10 @@ def list_requests(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return [MoneyRequestPublic.model_validate(r) for r in
-            social_service.list_requests(db, current_user, direction)]
+    return [
+        _public(db, r)
+        for r in social_service.list_requests(db, current_user, direction)
+    ]
 
 
 @router.post("/money-requests/{request_id}/pay", response_model=MoneyRequestPublic)
@@ -79,8 +85,10 @@ def pay_request(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    req = social_service.pay_request(db, current_user, request_id, payload.pin)
-    return MoneyRequestPublic.model_validate(req)
+    req = social_service.pay_request(
+        db, current_user, request_id, payload.pin, payload.phone
+    )
+    return _public(db, req)
 
 
 @router.post("/money-requests/{request_id}/decline", response_model=MoneyRequestPublic)
@@ -90,7 +98,7 @@ def decline_request(
     db: Session = Depends(get_db),
 ):
     req = social_service.decline_request(db, current_user, request_id)
-    return MoneyRequestPublic.model_validate(req)
+    return _public(db, req)
 
 
 @router.post("/money-requests/{request_id}/cancel", response_model=MoneyRequestPublic)
@@ -100,4 +108,4 @@ def cancel_request(
     db: Session = Depends(get_db),
 ):
     req = social_service.cancel_request(db, current_user, request_id)
-    return MoneyRequestPublic.model_validate(req)
+    return _public(db, req)

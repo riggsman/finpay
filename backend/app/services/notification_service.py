@@ -61,6 +61,7 @@ def deliver_notification(notification: Notification) -> None:
             "title": notification.title,
             "message": notification.message,
             "priority": notification.priority,
+            "event_id": notification.event_id,
         },
         event_id=notification.event_id,
     )

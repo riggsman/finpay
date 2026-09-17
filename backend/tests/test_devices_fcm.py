@@ -30,11 +30,16 @@ def test_register_and_list_device(client):
     r = client.post(f"{API}/me/devices", headers=h,
                     json={"device_id": "dev-1", "device_type": "web", "push_token": "TKN-A"})
     assert r.status_code == 200
-    assert r.json()["has_push_token"] is True
+    body = r.json()
+    assert body["push_enabled"] is True
+    assert "push_token" not in body
+    assert "device_id" not in body
 
     devices = client.get(f"{API}/me/devices", headers=h).json()
     assert len(devices) == 1
-    assert devices[0]["device_id"] == "dev-1"
+    assert devices[0]["device_type"] == "web"
+    assert "device_id" not in devices[0]
+    assert "push_token" not in devices[0]
 
 
 def test_reregister_same_device_updates_token(client):
@@ -59,9 +64,9 @@ def test_token_move_detaches_from_previous_owner(client):
 
     a_devices = client.get(f"{API}/me/devices", headers=auth_headers(a["access_token"])).json()
     # The token no longer belongs to user A.
-    assert all(not d["has_push_token"] for d in a_devices)
+    assert all(not d["push_enabled"] for d in a_devices)
     b_devices = client.get(f"{API}/me/devices", headers=auth_headers(b["access_token"])).json()
-    assert any(d["has_push_token"] for d in b_devices)
+    assert any(d["push_enabled"] for d in b_devices)
 
 
 def test_unregister_device(client):

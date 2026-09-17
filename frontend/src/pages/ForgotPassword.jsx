@@ -25,7 +25,7 @@ export default function ForgotPassword() {
         setCodeHint(res.reset_code_debug);
         setInfo(`Dev mode: your reset code is ${res.reset_code_debug}`);
       } else {
-        setInfo("If an account exists, a reset code has been sent.");
+        setInfo("If an account exists, a reset code has been emailed.");
       }
       setStep("code");
     } catch (err) {
@@ -75,7 +75,7 @@ export default function ForgotPassword() {
         {step === "request" && (
           <form onSubmit={submitRequest}>
             <h1>Forgot password</h1>
-            <p className="muted">Enter your phone or email to receive a reset code.</p>
+            <p className="muted">Enter your phone or email — we’ll email a reset code.</p>
             <label>Phone or email</label>
             <input
               value={identifier}
@@ -98,7 +98,7 @@ export default function ForgotPassword() {
         {step === "code" && (
           <form onSubmit={submitCode}>
             <h1>Enter reset code</h1>
-            <p className="muted">We sent a 6-digit code to {identifier}.</p>
+            <p className="muted">We emailed a 6-digit code to your registered address.</p>
             {info && <div className="alert alert-info">{info}</div>}
             <label>Reset code</label>
             <input

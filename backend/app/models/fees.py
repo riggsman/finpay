@@ -33,9 +33,11 @@ class ServiceFlag(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     key: Mapped[str] = mapped_column(String(40), unique=True, index=True, nullable=False)
     label: Mapped[str] = mapped_column(String(80), nullable=False)
-    # "service" (front-store tile) or "operation" (money movement)
+    # "service" (front-store tile), "operation" (money movement), or "notification"
     kind: Mapped[str] = mapped_column(String(20), default="service", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    # When True, HIGH/CRITICAL notifications for this service are also emailed.
+    email_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     updated_at: Mapped[dt.datetime] = mapped_column(
         UTCDateTime(),
         default=lambda: dt.datetime.now(dt.timezone.utc),

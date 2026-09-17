@@ -8,15 +8,23 @@ from app.core.security import hash_password, verify_password
 from app.models.token import RefreshToken
 from app.models.transaction import Transaction, TransactionStatus
 from app.models.user import User
-from app.services import audit_service
+from app.services import audit_service, catalog_service, limit_service
 from app.services.notification_service import create_notification, deliver_notification
 
 # Transaction types that draw down the wallet and count toward limits.
-DEBIT_TYPES = ("SEND_MONEY", "WITHDRAW", "ELECTRICITY")
+DEBIT_TYPES = ("SEND_MONEY", "WITHDRAW", "ELECTRICITY", "AIRTIME", "DATA")
 
 
 def _now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
+
+
+def effective_limits(db: Session, user: User) -> tuple[int, int]:
+    return limit_service.effective_limits(db, user)
+
+
+def spent_today(db: Session, user_id: int) -> int:
+    return _spent_today(db, user_id)
 
 
 def update_profile(db: Session, user: User, first_name: str | None,
@@ -110,16 +118,7 @@ def _spent_today(db: Session, user_id: int) -> int:
 
 def check_limits(db: Session, user: User, amount: int) -> None:
     """Enforce per-transaction and daily spending limits before a debit."""
-    if amount > user.per_txn_limit:
-        raise ValidationError(
-            f"Amount exceeds your per-transaction limit of {user.per_txn_limit / 100:,.2f}.",
-            code="PER_TXN_LIMIT_EXCEEDED",
-        )
-    if _spent_today(db, user.id) + amount > user.daily_limit:
-        raise ValidationError(
-            "This payment would exceed your daily limit.",
-            code="DAILY_LIMIT_EXCEEDED",
-        )
+    limit_service.assert_within_limits(db, user, amount)
 
 
 def list_sessions(db: Session, user: User) -> list[RefreshToken]:

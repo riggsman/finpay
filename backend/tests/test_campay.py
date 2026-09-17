@@ -300,3 +300,96 @@ def test_admin_test_collect_mocked(client, admin_token):
     assert r.status_code == 200, r.text
     assert r.json()["reference"]
     assert "does not credit" in r.json()["note"].lower()
+
+
+def test_describe_provider_action_flags_credit_when_out_of_sync():
+    from app.services.reconciliation_service import describe_provider_action
+
+    action = describe_provider_action("SUCCESS", "PENDING", "ADD_MONEY")
+    assert action["needs_reconciliation"] is True
+    assert "credit" in action["action_required"].lower()
+    assert action["action_label"]
+
+    synced = describe_provider_action("SUCCESS", "SUCCESS", "ADD_MONEY")
+    assert synced["needs_reconciliation"] is False
+
+
+def test_admin_verify_then_reconcile_credits_user(client, admin_token):
+    """When verify cannot auto-settle, reconcile credits wallet and updates status."""
+    user = register_active_user(client)
+    token = user["access_token"]
+    campay_ref = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+
+    mock_client = MagicMock()
+    mock_client.collect.return_value = {
+        "reference": campay_ref,
+        "status": "PENDING",
+        "ussd_code": "*126#",
+    }
+    mock_client.get_transaction.return_value = {
+        "reference": campay_ref,
+        "status": "SUCCESSFUL",
+        "amount": "1000",
+        "currency": "XAF",
+        "operator": "MTN",
+        "code": "00",
+        "operator_reference": "op-recon-1",
+        "external_reference": "",
+        "phone_number": "237650001234",
+        "reason": "",
+        "endpoint": "collect",
+    }
+
+    with patch.object(campay_mod, "campay_configured", return_value=True), patch.object(
+        campay_mod, "get_campay_client", return_value=mock_client
+    ), patch(
+        "app.services.wallet_service._use_campay_for_deposit", return_value=True
+    ):
+        created = client.post(
+            f"{API}/wallet/add-money",
+            headers={**auth_headers(token), "Idempotency-Key": "campay-recon-1"},
+            json={
+                "amount": 100000,
+                "funding_method": "mobile_money",
+                "phone": "+237650001234",
+            },
+        )
+    assert created.status_code == 200, created.text
+    txn_id = created.json()["id"]
+    assert created.json()["status"] == "PENDING"
+
+    before = client.get(f"{API}/wallet", headers=auth_headers(token)).json()["balance"]
+
+    with patch("app.integrations.campay.campay_credentials_ready", return_value=True), patch(
+        "app.integrations.campay.get_campay_client", return_value=mock_client
+    ), patch(
+        "app.services.reconciliation_service.apply_campay_outcome", return_value=False
+    ):
+        verified = client.post(
+            f"{API}/admin/transactions/{txn_id}/verify-provider",
+            headers=auth_headers(admin_token),
+        )
+    assert verified.status_code == 200, verified.text
+    body = verified.json()
+    assert body["provider_status"] == "SUCCESSFUL"
+    assert body["mapped_status"] == "SUCCESS"
+    assert body["finpay_status"] in ("PENDING", "PROCESSING", "CREATED")
+    assert body["needs_reconciliation"] is True
+    assert body["action_label"]
+    assert body["settled"] is False
+
+    with patch("app.integrations.campay.campay_credentials_ready", return_value=True), patch(
+        "app.integrations.campay.get_campay_client", return_value=mock_client
+    ):
+        reconciled = client.post(
+            f"{API}/admin/transactions/{txn_id}/reconcile",
+            headers=auth_headers(admin_token),
+        )
+    assert reconciled.status_code == 200, reconciled.text
+    out = reconciled.json()
+    assert out["settled"] is True
+    assert out["finpay_status"] == "SUCCESS"
+    assert out["needs_reconciliation"] is False
+
+    after = client.get(f"{API}/wallet", headers=auth_headers(token)).json()["balance"]
+    assert after == before + 100000

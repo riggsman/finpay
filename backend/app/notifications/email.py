@@ -45,6 +45,7 @@ NOTIFICATION_SERVICE_KEYS = {
     "PASSWORD_CHANGED": "security",
     "PIN_CHANGED": "security",
     "SUPPORT_TICKET_UPDATE": "support",
+    "SUPPORT_TICKET_REPLY": "support",
     "DISPUTE_UPDATE": "support",
 }
 

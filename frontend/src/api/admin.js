@@ -34,9 +34,16 @@ export const adminApi = {
   getUser: (id) => api.get(`/admin/users/${id}`),
 
   listTransactions: (params) => api.get(`/admin/transactions${qs(params)}`),
+  verifyTransactionProvider: (id) => api.post(`/admin/transactions/${id}/verify-provider`, {}),
+  reconcileTransaction: (id) => api.post(`/admin/transactions/${id}/reconcile`, {}),
   listLimitRequests: (params) => api.get(`/admin/limit-requests${qs(params)}`),
   approveLimitRequest: (id, body = {}) => api.post(`/admin/limit-requests/${id}/approve`, body),
   rejectLimitRequest: (id, reason) => api.post(`/admin/limit-requests/${id}/reject`, { reason }),
+
+  listTickets: (params) => api.get(`/admin/tickets${qs(params)}`),
+  getTicket: (id) => api.get(`/admin/tickets/${id}`),
+  replyTicket: (id, body) => api.post(`/admin/tickets/${id}/messages`, { body }),
+  updateTicketStatus: (id, status) => api.post(`/admin/tickets/${id}/status`, { status }),
 
   campayStatus: () => api.get("/admin/campay/status"),
   campayBalance: () => api.get("/admin/campay/balance"),

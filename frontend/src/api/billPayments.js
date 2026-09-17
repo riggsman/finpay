@@ -3,6 +3,19 @@ import { api } from "./client";
 export const billPaymentsApi = {
   providers: (category) =>
     api.get(`/bill-payments/providers?category=${encodeURIComponent(category)}`),
+  validate: (category, providerId, phone) =>
+    api.post("/bill-payments/validate", {
+      category,
+      provider_id: providerId,
+      phone,
+    }),
+  pay: (body, idempotencyKey) =>
+    api.post(
+      "/bill-payments/pay",
+      body,
+      idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}
+    ),
+  // Legacy aliases kept for older callers/tests.
   validateMeter: (providerId, meterNumber) =>
     api.post("/bill-payments/electricity/validate", {
       provider_id: providerId,

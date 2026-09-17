@@ -37,8 +37,9 @@ def register_initiate(payload: RegisterInitiateRequest, db: Session = Depends(ge
                      settings.RL_OTP_INITIATE_LIMIT, settings.RL_OTP_INITIATE_WINDOW)
     otp, _account_exists = auth_service.initiate_registration(db, payload.phone)
     db.commit()
+    auth_service.deliver_registration_otp(db, payload.phone, otp.code)
     return RegisterInitiateResponse(
-        message="Verification code sent.",
+        message="Verification code sent to your email.",
         expires_in=settings.OTP_TTL_SECONDS,
         otp_debug=otp.code if settings.EXPOSE_OTP_IN_RESPONSE else None,
     )
@@ -47,10 +48,10 @@ def register_initiate(payload: RegisterInitiateRequest, db: Session = Depends(ge
 @router.post("/register", response_model=MessageResponse)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)):
     auth_service.register_user(db, payload)
-    # Ensure an OTP exists for verification.
-    auth_service.initiate_registration(db, payload.phone)
+    otp, _ = auth_service.initiate_registration(db, payload.phone)
     db.commit()
-    return MessageResponse(message="Registration received. Verify the OTP to activate.")
+    auth_service.deliver_registration_otp(db, payload.phone, otp.code)
+    return MessageResponse(message="Registration received. Check your email for the OTP.")
 
 
 @router.post("/verify-otp", response_model=TokenResponse)
@@ -87,9 +88,13 @@ def password_reset_request(payload: PasswordResetRequest, db: Session = Depends(
                      settings.RL_PASSWORD_RESET_LIMIT, settings.RL_PASSWORD_RESET_WINDOW)
     entry = password_reset_service.request_reset(db, payload.identifier)
     db.commit()
+    if entry:
+        user = db.get(User, entry.user_id)
+        if user:
+            password_reset_service.deliver_reset_code(db, user, entry.code)
     # Respond generically to avoid account enumeration; expose the code only in dev.
     return PasswordResetRequestResponse(
-        message="If an account exists, a reset code has been sent.",
+        message="If an account exists, a reset code has been sent to the registered email.",
         expires_in=settings.RESET_CODE_TTL_SECONDS,
         reset_code_debug=(entry.code if (entry and settings.EXPOSE_OTP_IN_RESPONSE) else None),
     )

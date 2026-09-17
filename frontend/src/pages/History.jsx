@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import AppShell from "../components/AppShell";
 import { transactionsApi } from "../api/transactions";
-
-const CREDIT_TYPES = new Set(["ADD_MONEY", "TRANSFER_RECEIVED"]);
+import { CREDIT_TYPES, transactionStatusClass, transactionTitle } from "../utils/transactions";
 
 function money(minor) {
   return (minor / 100).toLocaleString(undefined, {
@@ -11,7 +11,7 @@ function money(minor) {
   });
 }
 
-const TYPES = ["", "ADD_MONEY", "SEND_MONEY", "TRANSFER_RECEIVED", "WITHDRAW", "ELECTRICITY"];
+const TYPES = ["", "ADD_MONEY", "SEND_MONEY", "TRANSFER_RECEIVED", "MONEY_REQUEST_OUT", "MONEY_REQUEST_IN", "MONEY_REQUEST_COLLECT", "CAMPAY_COLLECT", "CAMPAY_WITHDRAW", "WITHDRAW", "ELECTRICITY", "AIRTIME", "DATA"];
 const STATUSES = ["", "SUCCESS", "PROCESSING", "PENDING", "FAILED", "REVERSED"];
 
 const EMPTY = {
@@ -28,6 +28,7 @@ export default function History() {
   const navigate = useNavigate();
   const [filters, setFilters] = useState(EMPTY);
   const [applied, setApplied] = useState(EMPTY);
+  const [showFilters, setShowFilters] = useState(false);
   const [rows, setRows] = useState([]);
   const [page, setPage] = useState(1);
   const limit = 10;
@@ -46,6 +47,8 @@ export default function History() {
     load(applied, page).catch(() => {});
   }, [applied, page, load]);
 
+  const filtersActive = Object.values(applied).some((v) => v !== "");
+
   function applyFilters(e) {
     e.preventDefault();
     setPage(1);
@@ -59,84 +62,181 @@ export default function History() {
   }
 
   return (
-    <div className="container">
-      <div className="topbar">
-        <div className="brand"><span className="dot" /> FinPay</div>
-        <button className="btn-ghost" onClick={() => navigate("/dashboard")}>← Dashboard</button>
-      </div>
-
-      <h1>Transaction history</h1>
-
-      <form className="card mt filters" onSubmit={applyFilters}>
-        <div className="filter-grid">
-          <div>
-            <label>Type</label>
-            <select value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })}>
-              {TYPES.map((t) => <option key={t} value={t}>{t ? t.replaceAll("_", " ") : "All types"}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Status</label>
-            <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
-              {STATUSES.map((s) => <option key={s} value={s}>{s || "All statuses"}</option>)}
-            </select>
-          </div>
-          <div>
-            <label>Search</label>
-            <input value={filters.search} onChange={(e) => setFilters({ ...filters, search: e.target.value })} placeholder="reference or description" />
-          </div>
-          <div>
-            <label>Min amount</label>
-            <input type="number" min="0" value={filters.amount_min} onChange={(e) => setFilters({ ...filters, amount_min: e.target.value })} />
-          </div>
-          <div>
-            <label>Max amount</label>
-            <input type="number" min="0" value={filters.amount_max} onChange={(e) => setFilters({ ...filters, amount_max: e.target.value })} />
-          </div>
-          <div>
-            <label>From</label>
-            <input type="date" value={filters.date_from} onChange={(e) => setFilters({ ...filters, date_from: e.target.value })} />
-          </div>
-          <div>
-            <label>To</label>
-            <input type="date" value={filters.date_to} onChange={(e) => setFilters({ ...filters, date_to: e.target.value })} />
-          </div>
-        </div>
-        <div className="row mt" style={{ maxWidth: 320 }}>
-          <button className="btn-primary">Apply filters</button>
-          <button type="button" className="btn-ghost" onClick={reset}>Reset</button>
-        </div>
-      </form>
-
-      <div className="card mt">
-        {rows.length === 0 ? (
-          <div className="empty">No transactions match these filters.</div>
-        ) : (
-          rows.map((t) => {
-            const isCredit = CREDIT_TYPES.has(t.type);
-            return (
-              <div className="txn clickable" key={t.id} onClick={() => navigate(`/transactions/${t.id}`)}>
-                <div className="meta">
-                  <span>{t.type.replaceAll("_", " ")}</span>
-                  <span className="muted small">{t.reference} · {new Date(t.created_at).toLocaleString()}</span>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <div className="amt" style={{ color: isCredit ? "var(--accent)" : "var(--text)" }}>
-                    {isCredit ? "+" : "−"}{money(t.amount)} {t.currency}
-                  </div>
-                  <span className={`badge ${t.status}`}>{t.status}</span>
+    <AppShell showNav wide title="History" backTo="/wallet" className="dash-screen">
+      <div className="history-pad">
+        <div className={`history-layout ${showFilters ? "filters-open" : "filters-collapsed"}`}>
+          {showFilters && (
+            <aside className="history-filters card">
+              <div className="history-filters-head">
+                <h2>Filters</h2>
+                <div className="history-filters-head-actions">
+                  <button type="button" className="link-btn" onClick={reset}>Reset</button>
+                  <button
+                    type="button"
+                    className="btn-ghost history-filter-close"
+                    aria-label="Hide filters"
+                    onClick={() => setShowFilters(false)}
+                  >
+                    Hide
+                  </button>
                 </div>
               </div>
-            );
-          })
-        )}
-      </div>
+              <form onSubmit={applyFilters}>
+                <div className="filter-grid">
+                  <div>
+                    <label>Type</label>
+                    <select value={filters.type} onChange={(e) => setFilters({ ...filters, type: e.target.value })}>
+                      {TYPES.map((t) => (
+                        <option key={t || "all-types"} value={t}>
+                          {t ? t.replaceAll("_", " ") : "All types"}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label>Status</label>
+                    <select value={filters.status} onChange={(e) => setFilters({ ...filters, status: e.target.value })}>
+                      {STATUSES.map((s) => (
+                        <option key={s || "all-status"} value={s}>{s || "All statuses"}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="filter-span-2">
+                    <label>Search</label>
+                    <input
+                      value={filters.search}
+                      onChange={(e) => setFilters({ ...filters, search: e.target.value })}
+                      placeholder="Reference or description"
+                    />
+                  </div>
+                  <div>
+                    <label>Min amount</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={filters.amount_min}
+                      onChange={(e) => setFilters({ ...filters, amount_min: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label>Max amount</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={filters.amount_max}
+                      onChange={(e) => setFilters({ ...filters, amount_max: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label>From</label>
+                    <input
+                      type="date"
+                      value={filters.date_from}
+                      onChange={(e) => setFilters({ ...filters, date_from: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label>To</label>
+                    <input
+                      type="date"
+                      value={filters.date_to}
+                      onChange={(e) => setFilters({ ...filters, date_to: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div className="history-filter-actions">
+                  <button type="submit" className="btn-primary">Apply filters</button>
+                </div>
+              </form>
+            </aside>
+          )}
 
-      <div className="row mt" style={{ maxWidth: 320 }}>
-        <button className="btn-ghost" disabled={page === 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>← Prev</button>
-        <span className="pill" style={{ justifyContent: "center" }}>Page {page}</span>
-        <button className="btn-ghost" disabled={rows.length < limit} onClick={() => setPage((p) => p + 1)}>Next →</button>
+          <section className="history-results">
+            <div className="history-results-head">
+              <div>
+                <h2>Transactions</h2>
+                <p className="muted small">
+                  {rows.length === 0 ? "No matches" : `Showing ${rows.length} on page ${page}`}
+                  {filtersActive ? " · filters applied" : ""}
+                </p>
+              </div>
+              <div className="history-toolbar">
+                <button
+                  type="button"
+                  className={`btn-ghost history-filter-toggle ${showFilters ? "active" : ""} ${filtersActive ? "has-filters" : ""}`}
+                  onClick={() => setShowFilters((v) => !v)}
+                  aria-expanded={showFilters}
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <path d="M4 6h16M7 12h10M10 18h4" />
+                  </svg>
+                  {showFilters ? "Hide filters" : "Filters"}
+                  {filtersActive && !showFilters && <span className="filter-dot" />}
+                </button>
+                <div className="history-pager">
+                  <button type="button" className="btn-ghost" disabled={page === 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                    ← Prev
+                  </button>
+                  <span className="pill">Page {page}</span>
+                  <button type="button" className="btn-ghost" disabled={rows.length < limit} onClick={() => setPage((p) => p + 1)}>
+                    Next →
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="card history-list-card">
+              {rows.length === 0 ? (
+                <div className="empty">No transactions match these filters.</div>
+              ) : (
+                <>
+                  <div className="history-table-head" aria-hidden="true">
+                    <span>Type</span>
+                    <span>Reference / date</span>
+                    <span>Amount</span>
+                    <span>Status</span>
+                  </div>
+                  {rows.map((t) => {
+                    const isCredit = CREDIT_TYPES.has(t.type);
+                    const isFailed = t.status === "FAILED";
+                    return (
+                      <button
+                        type="button"
+                        className="history-row"
+                        key={t.id}
+                        onClick={() => navigate(`/transactions/${t.id}`)}
+                      >
+                        <div className="history-row-type">
+                          <span className={`activity-ico ${isFailed ? "out" : isCredit ? "in" : "out"}`}>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              {isCredit ? (
+                                <path d="M12 19V5M5 12l7-7 7 7" />
+                              ) : (
+                                <path d="M12 5v14M5 12l7 7 7-7" />
+                              )}
+                            </svg>
+                          </span>
+                          <strong>{transactionTitle(t)}</strong>
+                        </div>
+                        <div className="history-row-meta">
+                          <span className="mono">{t.reference}</span>
+                          <span className="muted small">{new Date(t.created_at).toLocaleString()}</span>
+                        </div>
+                        <div className={`history-row-amt ${isFailed ? "failed" : isCredit ? "in" : "out"}`}>
+                          {isCredit ? "+" : "−"}{money(t.amount)} {t.currency}
+                        </div>
+                        <div className="history-row-status">
+                          <span className={`badge ${transactionStatusClass(t.status)}`}>{t.status}</span>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </>
+              )}
+            </div>
+          </section>
+        </div>
       </div>
-    </div>
+    </AppShell>
   );
 }

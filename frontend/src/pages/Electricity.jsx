@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { billPaymentsApi, transactionApi } from "../api/billPayments";
 import { walletApi } from "../api/wallet";
 import { socketService } from "../services/socketService";
-import { computeFee } from "../services/feeConfig";
+import { computeFee, refreshConfig } from "../services/feeConfig";
 
 function money(minor) {
   return (minor / 100).toLocaleString(undefined, {
@@ -34,6 +34,7 @@ export default function Electricity() {
   useEffect(() => {
     billPaymentsApi.providers("electricity").then((r) => setProviders(r.providers)).catch(() => {});
     walletApi.get().then(setWallet).catch(() => {});
+    refreshConfig().catch(() => {});
   }, []);
 
   useEffect(() => () => clearInterval(pollRef.current), []);
@@ -131,7 +132,9 @@ export default function Electricity() {
   }
 
   return (
-    <div className="container">
+    <div className="app-viewport">
+      <div className="app-frame">
+        <div className="app-scroll" style={{ padding: "12px 16px 28px" }}>
       <div className="topbar">
         <div className="brand">
           <span className="dot" />
@@ -144,7 +147,7 @@ export default function Electricity() {
 
       <h1>⚡ Electricity</h1>
       <p className="muted">
-        Wallet balance: <strong style={{ color: "var(--text)" }}>{money(wallet.balance)} {wallet.currency}</strong>
+        Wallet balance: <strong>{money(wallet.balance)} {wallet.currency}</strong>
       </p>
 
       <div className="card mt" style={{ maxWidth: 520 }}>
@@ -272,6 +275,8 @@ export default function Electricity() {
             </div>
           </div>
         )}
+      </div>
+        </div>
       </div>
     </div>
   );

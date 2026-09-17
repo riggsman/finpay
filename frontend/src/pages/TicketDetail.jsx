@@ -1,6 +1,17 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supportApi } from "../api/support";
+import { getAccessToken } from "../api/client";
+
+async function loadScreenshot(ticketId) {
+  const token = getAccessToken();
+  const res = await fetch(`/api/v1/support/tickets/${ticketId}/screenshot`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) return null;
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
 
 export default function TicketDetail() {
   const { id } = useParams();
@@ -8,12 +19,34 @@ export default function TicketDetail() {
   const [ticket, setTicket] = useState(null);
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState(false);
+  const [shotUrl, setShotUrl] = useState(null);
 
   function load() {
     supportApi.getTicket(id).then(setTicket).catch(() => {});
   }
 
   useEffect(() => { load(); }, [id]);
+
+  useEffect(() => {
+    let revoked = false;
+    let url = null;
+    if (!ticket?.has_screenshot) {
+      setShotUrl(null);
+      return undefined;
+    }
+    loadScreenshot(ticket.id).then((u) => {
+      if (revoked) {
+        if (u) URL.revokeObjectURL(u);
+        return;
+      }
+      url = u;
+      setShotUrl(u);
+    });
+    return () => {
+      revoked = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [ticket?.id, ticket?.has_screenshot]);
 
   async function send(e) {
     e.preventDefault();
@@ -46,6 +79,30 @@ export default function TicketDetail() {
       <p className="muted">
         {ticket.reference} · {ticket.category} · <span className={`badge ${ticket.status === "CLOSED" ? "" : "PROCESSING"}`}>{ticket.status}</span>
       </p>
+
+      {(ticket.page_url || ticket.has_screenshot) && (
+        <div className="card mt" style={{ maxWidth: 680 }}>
+          <h2>Issue context</h2>
+          {ticket.page_url && (
+            <p className="small"><span className="muted">Page:</span> {ticket.page_url}</p>
+          )}
+          {ticket.context?.viewport && (
+            <p className="small muted">
+              Viewport {ticket.context.viewport.width}×{ticket.context.viewport.height}
+              {ticket.context.timezone ? ` · ${ticket.context.timezone}` : ""}
+            </p>
+          )}
+          {shotUrl && (
+            <div className="mt">
+              <img
+                src={shotUrl}
+                alt="Issue screenshot"
+                style={{ width: "100%", borderRadius: 12, border: "1px solid var(--border)" }}
+              />
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="card mt" style={{ maxWidth: 680 }}>
         <div className="thread">

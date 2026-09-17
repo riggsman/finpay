@@ -6,10 +6,12 @@ from app.db.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.user import User
 from app.schemas.billing import (
+    AccountValidateRequest,
     ElectricityConfirmRequest,
     MeterValidateRequest,
     MeterValidateResponse,
     TopupConfirmRequest,
+    UnifiedPayRequest,
 )
 from app.schemas.transaction import TransactionPublic
 from app.services import billing_service
@@ -23,7 +25,50 @@ def list_providers(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    return {"providers": billing_service.list_providers(db, category)}
+    # Unified list: all enabled providers for the category (any flow).
+    return {"providers": billing_service.list_category_providers(db, category)}
+
+
+@router.post("/validate", response_model=MeterValidateResponse)
+def validate_account(
+    payload: AccountValidateRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    validation = billing_service.validate_account(
+        db, current_user, payload.category, payload.provider_id, payload.phone
+    )
+    pname = billing_service.provider_name(db, payload.category, validation.provider_id)
+    return MeterValidateResponse(
+        validation_token=validation.token,
+        customer={"name": validation.customer_name, "meter_number": validation.meter_number},
+        provider={"id": validation.provider_id, "name": pname},
+        expires_in=settings.VALIDATION_TOKEN_TTL_SECONDS,
+        category=payload.category,
+    )
+
+
+@router.post("/pay", response_model=TransactionPublic)
+def unified_pay(
+    payload: UnifiedPayRequest,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+):
+    key = payload.idempotency_key or idempotency_key
+    txn = billing_service.pay(
+        db,
+        current_user,
+        category=payload.category,
+        provider_id=payload.provider_id,
+        phone=payload.phone,
+        amount=payload.amount,
+        message=payload.message,
+        pin=payload.pin,
+        validation_token=payload.validation_token,
+        idempotency_key=key,
+    )
+    return TransactionPublic.model_validate(txn)
 
 
 @router.post("/electricity/validate", response_model=MeterValidateResponse)
@@ -41,6 +86,7 @@ def validate_meter(
         customer={"name": validation.customer_name, "meter_number": validation.meter_number},
         provider={"id": validation.provider_id, "name": pname},
         expires_in=settings.VALIDATION_TOKEN_TTL_SECONDS,
+        category="electricity",
     )
 
 
@@ -63,7 +109,7 @@ def confirm_topup(
     key = payload.idempotency_key or idempotency_key
     txn = billing_service.confirm_topup(
         db, current_user, payload.category, payload.provider_id, payload.target,
-        payload.amount, payload.pin, key,
+        payload.amount, payload.pin, key, message=payload.message,
     )
     return TransactionPublic.model_validate(txn)
 
@@ -83,5 +129,7 @@ def confirm_electricity(
         amount=payload.amount,
         pin=payload.pin,
         idempotency_key=key,
+        message=payload.message,
+        category="electricity",
     )
     return TransactionPublic.model_validate(txn)

@@ -12,6 +12,9 @@ from app.services import audit_service, fee_service, security_service, wallet_se
 from app.services.notification_service import create_notification, deliver_notification
 from app.websocket.socket import emit_to_user
 
+# Realtime delivery context for send_money when commit is deferred (money-request pay).
+_SEND_MONEY_RT: dict[int, dict] = {}
+
 
 def _now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
@@ -49,8 +52,23 @@ def _new_txn(user_id: int, type_: str, amount: int, currency: str,
     )
 
 
-def send_money(db: Session, sender: User, recipient_identifier: str, amount: int,
-               pin: str, idempotency_key: str | None) -> Transaction:
+def send_money(
+    db: Session,
+    sender: User,
+    recipient_identifier: str,
+    amount: int,
+    pin: str,
+    idempotency_key: str | None,
+    *,
+    commit: bool = True,
+) -> Transaction:
+    """Transfer wallet funds between two users.
+
+    When ``commit=False`` the ledger rows and notifications are flushed but not
+    committed or delivered — callers (e.g. money-request pay) can include extra
+    row updates in the same transaction, then call
+    ``publish_send_money_realtime`` after their own commit.
+    """
     if amount <= 0:
         raise ValidationError("Amount must be positive.", code="INVALID_AMOUNT")
     fee_service.ensure_enabled(db, "send_money")
@@ -131,32 +149,82 @@ def send_money(db: Session, sender: User, recipient_identifier: str, amount: int
                          meta={"type": "SEND_MONEY", "amount": amount, "status": "SUCCESS"})
     from app.services import limit_service
     limit_service.record_debit_against_grant(db, sender.id, amount)
-    db.commit()
-    db.refresh(sender_txn)
 
-    # Realtime: sender side.
-    emit_to_user(sender.id, "TRANSFER_SENT", {
-        "transaction_id": sender_txn.id, "amount": amount, "to": recipient_name,
-    })
-    emit_to_user(sender.id, "TRANSACTION_SUCCESS", {
-        "transaction_id": sender_txn.id, "reference": sender_txn.reference,
-        "status": sender_txn.status, "amount": amount, "currency": sender_wallet.currency,
-    })
-    emit_to_user(sender.id, "WALLET_BALANCE_UPDATED", {
-        "balance": sender_balance, "currency": sender_wallet.currency,
-    })
-    deliver_notification(sender_notif)
+    # Stash delivery context for publish_send_money_realtime (survives expire_on_commit).
+    _SEND_MONEY_RT[sender_txn.id] = {
+        "recipient_id": recipient.id,
+        "recipient_txn_id": recipient_txn.id,
+        "amount": amount,
+        "sender_name": sender_name,
+        "recipient_name": recipient_name,
+        "sender_balance": sender_balance,
+        "recipient_balance": recipient_balance,
+        "sender_currency": sender_wallet.currency,
+        "recipient_currency": recipient_wallet.currency,
+        "sender_notif_id": sender_notif.id,
+        "recipient_notif_id": recipient_notif.id,
+    }
 
-    # Realtime: recipient side (they may be connected in another session).
-    emit_to_user(recipient.id, "TRANSFER_RECEIVED", {
-        "transaction_id": recipient_txn.id, "amount": amount, "from": sender_name,
-    })
-    emit_to_user(recipient.id, "WALLET_BALANCE_UPDATED", {
-        "balance": recipient_balance, "currency": recipient_wallet.currency,
-    })
-    deliver_notification(recipient_notif)
+    if commit:
+        db.commit()
+        db.refresh(sender_txn)
+        publish_send_money_realtime(db, sender_txn)
 
     return sender_txn
+
+
+def publish_send_money_realtime(db: Session, sender_txn: Transaction) -> None:
+    """Emit Socket.IO / push / email for a committed P2P transfer."""
+    ctx = _SEND_MONEY_RT.pop(sender_txn.id, {}) or {}
+    recipient_id = ctx.get("recipient_id")
+    amount = int(ctx.get("amount") or sender_txn.amount)
+    sender_name = ctx.get("sender_name") or "FinPay user"
+    recipient_name = ctx.get("recipient_name") or "FinPay user"
+    sender_balance = ctx.get("sender_balance")
+    recipient_balance = ctx.get("recipient_balance")
+    sender_currency = ctx.get("sender_currency") or sender_txn.currency
+    recipient_currency = ctx.get("recipient_currency") or sender_txn.currency
+
+    if sender_balance is None:
+        sender_balance = wallet_service.get_wallet(db, sender_txn.user_id).balance
+    if recipient_id is not None and recipient_balance is None:
+        recipient_balance = wallet_service.get_wallet(db, recipient_id).balance
+
+    from app.models.notification import Notification
+
+    sender_notif = None
+    recipient_notif = None
+    if ctx.get("sender_notif_id"):
+        sender_notif = db.get(Notification, ctx["sender_notif_id"])
+    if ctx.get("recipient_notif_id"):
+        recipient_notif = db.get(Notification, ctx["recipient_notif_id"])
+
+    # Realtime: sender side.
+    emit_to_user(sender_txn.user_id, "TRANSFER_SENT", {
+        "transaction_id": sender_txn.id, "amount": amount, "to": recipient_name,
+    })
+    emit_to_user(sender_txn.user_id, "TRANSACTION_SUCCESS", {
+        "transaction_id": sender_txn.id, "reference": sender_txn.reference,
+        "status": sender_txn.status, "amount": amount, "currency": sender_currency,
+    })
+    emit_to_user(sender_txn.user_id, "WALLET_BALANCE_UPDATED", {
+        "balance": sender_balance, "currency": sender_currency,
+    })
+    if sender_notif:
+        deliver_notification(sender_notif)
+
+    # Realtime: recipient side.
+    if recipient_id is not None:
+        emit_to_user(recipient_id, "TRANSFER_RECEIVED", {
+            "transaction_id": ctx.get("recipient_txn_id"),
+            "amount": amount,
+            "from": sender_name,
+        })
+        emit_to_user(recipient_id, "WALLET_BALANCE_UPDATED", {
+            "balance": recipient_balance, "currency": recipient_currency,
+        })
+        if recipient_notif:
+            deliver_notification(recipient_notif)
 
 
 def settle_campay_withdraw_success(db: Session, txn: Transaction) -> Transaction:

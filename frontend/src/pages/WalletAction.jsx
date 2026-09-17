@@ -150,13 +150,9 @@ export default function WalletAction({ mode }) {
 
   function startPolling(txnId) {
     clearInterval(pollRef.current);
-    let nudged = false;
     pollRef.current = setInterval(async () => {
       try {
-        if (!nudged) {
-          nudged = true;
-          recoveryApi.reconcile().catch(() => {});
-        }
+        recoveryApi.reconcile().catch(() => {});
         const txn = await transactionsApi.get(txnId);
         if (!PENDING_STATUSES.has(txn.status)) {
           walletApi.get().then(setWallet).catch(() => {});

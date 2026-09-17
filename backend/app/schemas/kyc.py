@@ -1,4 +1,5 @@
 import datetime as dt
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -14,6 +15,7 @@ class KycProfilePublic(BaseModel):
     id_type: str | None = None
     id_number: str | None = None
     id_document_ref: str | None = None
+    id_document_back_ref: str | None = None
     selfie_ref: str | None = None
     rejection_reason: str | None = None
     submitted_at: dt.datetime | None = None
@@ -33,4 +35,16 @@ class KycUpdateRequest(BaseModel):
     id_type: str | None = Field(default=None, max_length=40)
     id_number: str | None = Field(default=None, max_length=64)
     id_document_ref: str | None = Field(default=None, max_length=255)
+    id_document_back_ref: str | None = Field(default=None, max_length=255)
     selfie_ref: str | None = Field(default=None, max_length=255)
+
+
+class KycCaptureRequest(BaseModel):
+    kind: Literal["front", "back", "selfie"]
+    image_base64: str = Field(min_length=32)
+
+
+class KycCaptureResponse(BaseModel):
+    kind: str
+    ref: str
+    field: str

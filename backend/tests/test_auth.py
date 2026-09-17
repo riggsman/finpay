@@ -1,4 +1,5 @@
 from app.core.config import settings
+from app.notifications import email as email_channel
 
 from .conftest import auth_headers, register_active_user, unique_phone
 
@@ -44,6 +45,28 @@ def test_register_verify_login_flow(client):
     )
     assert login.status_code == 200
     assert login.json()["user"]["phone"] == phone
+
+
+def test_registration_otp_is_emailed(client, monkeypatch):
+    monkeypatch.setattr(settings, "EMAIL_BACKEND", "console")
+    email_channel.sent_log.clear()
+    phone = unique_phone()
+    client.post(
+        f"{API}/auth/register",
+        json={
+            "phone": phone,
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "password": "Password123",
+        },
+    )
+    assert email_channel.sent_log, "OTP should be emailed after register"
+    first = email_channel.sent_log[-1]
+    assert first["to"].endswith("@local.dev")
+    assert "verification code" in first["body"].lower()
+
+    otp = client.post(f"{API}/auth/register/initiate", json={"phone": phone}).json()["otp_debug"]
+    assert otp in email_channel.sent_log[-1]["body"]
 
 
 def test_login_with_wrong_password_rejected(client):

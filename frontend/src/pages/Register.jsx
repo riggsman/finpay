@@ -32,9 +32,9 @@ export default function Register() {
       // In development the backend returns the OTP to simplify testing.
       if (initiated.otp_debug) {
         setOtpHint(initiated.otp_debug);
-        setInfo(`Dev mode: your OTP is ${initiated.otp_debug}`);
+        setInfo(`We emailed your verification code. Dev hint: ${initiated.otp_debug}`);
       } else {
-        setInfo("We sent a verification code to your phone.");
+        setInfo("We sent a verification code to your email (@local.dev).");
       }
       setStep("otp");
     } catch (err) {
@@ -86,8 +86,19 @@ export default function Register() {
             <label>Phone</label>
             <input value={form.phone} onChange={update("phone")} placeholder="+237650000001" required />
 
-            <label>Email (optional)</label>
-            <input type="email" value={form.email} onChange={update("email")} placeholder="you@example.com" />
+            <label>Email local-part (optional)</label>
+            <div className="row" style={{ alignItems: "center", gap: 8 }}>
+              <input
+                value={form.email}
+                onChange={update("email")}
+                placeholder="john"
+                style={{ flex: 1 }}
+              />
+              <span className="muted">@local.dev</span>
+            </div>
+            <p className="muted small" style={{ marginTop: 4 }}>
+              Leave blank to auto-assign from your first name (e.g. john@local.dev).
+            </p>
 
             <label>Password</label>
             <input
@@ -112,8 +123,8 @@ export default function Register() {
           </form>
         ) : (
           <form onSubmit={submitOtp}>
-            <h1>Verify your phone</h1>
-            <p className="muted">Enter the 6-digit code we sent to {form.phone}.</p>
+            <h1>Verify your email</h1>
+            <p className="muted">Enter the 6-digit code we sent to your FinPay email.</p>
 
             {info && <div className="alert alert-info">{info}</div>}
 

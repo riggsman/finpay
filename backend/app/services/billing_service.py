@@ -16,7 +16,6 @@ from app.models.transaction import (
     TransactionStatus,
 )
 from app.models.user import User
-from app.models.wallet import LedgerEntry
 from app.services import (
     audit_service,
     catalog_service,
@@ -41,9 +40,23 @@ def _now() -> dt.datetime:
 
 def _provider_list(db: Session, category: str, enabled_only: bool = True) -> list[dict]:
     return [
-        {"id": p.provider_id, "name": p.name, "category": p.category}
+        {
+            "id": p.provider_id,
+            "name": p.name,
+            "category": p.category,
+            "flow": p.flow,
+            "target_label": p.target_label,
+            "icon": p.icon,
+            "integration_mode": p.integration_mode,
+            "fields": catalog_service.provider_public_fields(p),
+        }
         for p in catalog_service.list_providers(db, category, enabled_only=enabled_only)
     ]
+
+
+def list_category_providers(db: Session, category: str) -> list[dict]:
+    """All enabled providers for a category (any flow) for the unified checkout."""
+    return _provider_list(db, category, enabled_only=True)
 
 
 def provider_name(db: Session, category: str, provider_id: str) -> str:
@@ -52,28 +65,32 @@ def provider_name(db: Session, category: str, provider_id: str) -> str:
 
 
 def list_providers(db: Session, category: str) -> list[dict]:
-    if category != "electricity":
-        return []
-    return _provider_list(db, "electricity")
+    """Providers for validate_pay flows (e.g. electricity)."""
+    rows = _provider_list(db, category)
+    return [r for r in rows if r.get("flow") == "validate_pay"]
 
 
 def list_topup_providers(db: Session, category: str) -> list[dict]:
-    if category not in ("airtime", "data"):
-        return []
-    return _provider_list(db, category)
+    """Providers for direct_topup flows (airtime, data, water, custom)."""
+    rows = _provider_list(db, category)
+    return [r for r in rows if r.get("flow") == "direct_topup"]
 
 
 def confirm_topup(db: Session, user: User, category: str, provider_id: str,
                   target: str, amount: int, pin: str,
-                  idempotency_key: str | None) -> Transaction:
-    """Synchronous airtime/data top-up. Reuses the transaction engine
-    (PIN, limits, idempotency, ledger, realtime). Targets ending in 0000 model
-    a provider decline (no debit)."""
-    if category not in ("airtime", "data"):
-        raise ValidationError("Unknown top-up category.", code="UNKNOWN_CATEGORY")
+                  idempotency_key: str | None,
+                  message: str | None = None) -> Transaction:
+    """Synchronous top-up for any direct_topup provider category.
+    Targets ending in 0000 model a provider decline (no debit)."""
+    category = catalog_service.normalize_category(category)
     provider = catalog_service.get_provider(db, category, provider_id)
     if not provider or not provider.enabled:
         raise ValidationError("Unknown provider.", code="UNKNOWN_PROVIDER")
+    if provider.flow != "direct_topup":
+        raise ValidationError(
+            "This provider requires the validate-and-pay flow.",
+            code="INVALID_PROVIDER_FLOW",
+        )
     if amount <= 0:
         raise ValidationError("Amount must be positive.", code="INVALID_AMOUNT")
     fee_service.ensure_enabled(db, category)
@@ -99,18 +116,23 @@ def confirm_topup(db: Session, user: User, category: str, provider_id: str,
     security_service.check_limits(db, user, amount)
 
     pname = provider.name
+    note = (message or "").strip()
+    description = f"{pname} {category} for {target}"
+    if note:
+        description = f"{description} — {note}"
     txn = Transaction(
         reference="txn_" + uuid.uuid4().hex[:16],
         user_id=user.id,
         type=category.upper(),
         status=TransactionStatus.CREATED.value,
         amount=amount,
-        fee=fee,
+        fee=0,
         currency=wallet.currency,
-        description=f"{pname} {category} for {target}",
+        description=description,
     )
     db.add(txn)
     db.flush()
+    fee_service.attach_fee(db, txn, category.upper(), amount)
     if idempotency_key:
         db.add(IdempotencyKey(key=idempotency_key, user_id=user.id, transaction_id=txn.id))
     db.add(
@@ -120,7 +142,7 @@ def confirm_topup(db: Session, user: User, category: str, provider_id: str,
     )
     audit_service.record(db, "TRANSACTION_CREATED", user_id=user.id,
                          entity_type="transaction", entity_id=txn.id,
-                         meta={"type": txn.type, "amount": amount})
+                         meta={"type": txn.type, "amount": amount, "fee": txn.fee})
     wallet_service.record_event(db, txn, "TRANSACTION_CREATED", None,
                                 TransactionStatus.CREATED.value)
     txn.status = TransactionStatus.PROCESSING.value
@@ -134,9 +156,9 @@ def confirm_topup(db: Session, user: User, category: str, provider_id: str,
               "The provider declined the top-up.")
         return txn
 
+    # Fee is already on the transaction; debit amount + fee now.
     txn.provider_reference = "prov_" + uuid.uuid4().hex[:12]
-    balance = wallet_service.apply_ledger(db, wallet, "DEBIT", amount + fee, txn.id,
-                                          txn.description)
+    balance = wallet_service.debit_with_fee(db, wallet, txn, txn.description)
     txn.status = TransactionStatus.SUCCESS.value
     txn.completed_at = _now()
     wallet_service.record_event(db, txn, "TRANSACTION_SUCCESS",
@@ -146,8 +168,11 @@ def confirm_topup(db: Session, user: User, category: str, provider_id: str,
     notif = create_notification(
         db, user_id=user.id, type="BILL_PAYMENT_SUCCESS", title="Top-up Successful",
         message=f"Your {category} top-up of {amount / 100:,.2f} {wallet.currency} was successful.",
-        priority="HIGH", data={"transaction_id": txn.id, "amount": amount},
+        priority="HIGH",
+        data={"transaction_id": txn.id, "amount": amount, "category": category},
     )
+    from app.services import limit_service
+    limit_service.record_debit_against_grant(db, user.id, amount)
     db.commit()
     db.refresh(txn)
     db.refresh(wallet)
@@ -168,13 +193,31 @@ def _mock_customer_name(meter_number: str) -> str:
 
 def validate_meter(db: Session, user: User, provider_id: str,
                    meter_number: str) -> ElectricityValidation:
-    provider = catalog_service.get_provider(db, "electricity", provider_id)
+    return validate_account(db, user, "electricity", provider_id, meter_number)
+
+
+def validate_account(
+    db: Session,
+    user: User,
+    category: str,
+    provider_id: str,
+    phone: str,
+) -> ElectricityValidation:
+    """Validate destination for any validate_pay provider (phone maps to meter/account)."""
+    category = catalog_service.normalize_category(category)
+    provider = catalog_service.get_provider(db, category, provider_id)
     if not provider or not provider.enabled:
-        raise ValidationError("Unknown electricity provider.", code="UNKNOWN_PROVIDER")
-    normalized = meter_number.strip()
-    if len(normalized) < 6 or not normalized.isdigit():
+        raise ValidationError("Unknown provider.", code="UNKNOWN_PROVIDER")
+    if provider.flow != "validate_pay":
         raise ValidationError(
-            "Invalid meter number. Enter at least 6 digits.", code="INVALID_METER"
+            "This provider does not use validate-and-pay.",
+            code="INVALID_PROVIDER_FLOW",
+        )
+    normalized = (phone or "").strip()
+    if len(normalized) < 6:
+        raise ValidationError(
+            "Invalid account / phone. Enter at least 6 characters.",
+            code="INVALID_METER",
         )
 
     validation = ElectricityValidation(
@@ -192,11 +235,14 @@ def validate_meter(db: Session, user: User, provider_id: str,
 
 
 def confirm_electricity(db: Session, user: User, validation_token: str, amount: int,
-                        pin: str, idempotency_key: str | None) -> Transaction:
+                        pin: str, idempotency_key: str | None,
+                        message: str | None = None,
+                        category: str = "electricity") -> Transaction:
     if amount <= 0:
         raise ValidationError("Amount must be positive.", code="INVALID_AMOUNT")
 
-    fee_service.ensure_enabled(db, "electricity")
+    category = catalog_service.normalize_category(category)
+    fee_service.ensure_enabled(db, category)
     # Verify transaction PIN / authorization (SRS section 39).
     if not user.transaction_pin_hash or not verify_password(pin, user.transaction_pin_hash):
         raise AuthError("Incorrect transaction PIN.", code="INVALID_PIN")
@@ -230,7 +276,8 @@ def confirm_electricity(db: Session, user: User, validation_token: str, amount: 
         raise ValidationError("Validation token expired. Please re-validate the meter.",
                               code="VALIDATION_EXPIRED")
 
-    fee = fee_service.compute_fee(db, "ELECTRICITY", amount)
+    fee_op = category.upper()
+    fee = fee_service.compute_fee(db, fee_op, amount)
     wallet = wallet_service.get_wallet(db, user.id)
     if wallet.balance < amount + fee:
         raise ValidationError("Insufficient wallet balance.", code="INSUFFICIENT_BALANCE")
@@ -238,24 +285,35 @@ def confirm_electricity(db: Session, user: User, validation_token: str, amount: 
 
     validation.consumed = True
 
+    note = (message or "").strip()
+    description = (
+        f"{category_label_safe(category)} • "
+        f"{provider_name(db, category, validation.provider_id)} • "
+        f"{validation.meter_number}"
+    )
+    if note:
+        description = f"{description} — {note}"
+
     txn = Transaction(
         reference="txn_" + uuid.uuid4().hex[:16],
         user_id=user.id,
-        type="ELECTRICITY",
+        type=fee_op,
         status=TransactionStatus.CREATED.value,
         amount=amount,
-        fee=fee,
+        fee=0,
         currency=wallet.currency,
-        description=f"Electricity • {provider_name(db, 'electricity', validation.provider_id)} • {validation.meter_number}",
+        description=description,
     )
     db.add(txn)
     db.flush()
+    # Stamp fee onto the transaction before holding funds.
+    fee_service.attach_fee(db, txn, fee_op, amount)
 
     db.add(
         BillPayment(
             transaction_id=txn.id,
             user_id=user.id,
-            category="electricity",
+            category=category,
             provider_id=validation.provider_id,
             meter_number=validation.meter_number,
             customer_name=validation.customer_name,
@@ -269,7 +327,7 @@ def confirm_electricity(db: Session, user: User, validation_token: str, amount: 
 
     audit_service.record(db, "TRANSACTION_CREATED", user_id=user.id,
                          entity_type="transaction", entity_id=txn.id,
-                         meta={"type": "ELECTRICITY", "amount": amount})
+                         meta={"type": fee_op, "amount": amount, "fee": txn.fee})
 
     wallet_service.record_event(db, txn, "TRANSACTION_CREATED", None,
                                 TransactionStatus.CREATED.value)
@@ -278,18 +336,23 @@ def confirm_electricity(db: Session, user: User, validation_token: str, amount: 
                                 TransactionStatus.CREATED.value,
                                 TransactionStatus.PENDING.value)
 
+    # Hold amount + fee immediately so the configured fee is locked before provider work.
+    balance = wallet_service.debit_with_fee(db, wallet, txn, txn.description)
+
     # Simulated provider timeout: meters ending in 5555 or 4444 return an unknown
     # result. Per the SRS, we must NOT mark the transaction failed; leave it
-    # pending for the reconciliation worker to settle.
+    # pending for the reconciliation worker to settle (funds already held).
     if validation.meter_number.endswith(("5555", "4444")):
         txn.pending_reconciliation = True
         wallet_service.record_event(db, txn, "PROVIDER_TIMEOUT",
                                     TransactionStatus.PENDING.value,
-                                    TransactionStatus.PENDING.value)
+                                    TransactionStatus.PENDING.value,
+                                    {"held": wallet_service.total_charge(txn)})
         notif = create_notification(
             db, user_id=user.id, type="PAYMENT_PENDING", title="Payment Pending",
             message="Your payment is still being processed. We'll update you shortly.",
-            priority="NORMAL", data={"transaction_id": txn.id},
+            priority="HIGH",
+            data={"transaction_id": txn.id, "category": "electricity"},
         )
         db.commit()
         db.refresh(txn)
@@ -297,13 +360,16 @@ def confirm_electricity(db: Session, user: User, validation_token: str, amount: 
             "transaction_id": txn.id, "reference": txn.reference,
             "status": txn.status, "amount": txn.amount, "currency": txn.currency,
         })
+        emit_to_user(user.id, "WALLET_BALANCE_UPDATED",
+                     {"balance": balance, "currency": wallet.currency})
         deliver_notification(notif)
         return txn
 
     txn.status = TransactionStatus.PROCESSING.value
     wallet_service.record_event(db, txn, "TRANSACTION_PROCESSING",
                                 TransactionStatus.PENDING.value,
-                                TransactionStatus.PROCESSING.value)
+                                TransactionStatus.PROCESSING.value,
+                                {"held": wallet_service.total_charge(txn)})
 
     db.commit()
     db.refresh(txn)
@@ -320,6 +386,8 @@ def confirm_electricity(db: Session, user: User, validation_token: str, amount: 
         "amount": txn.amount,
         "currency": txn.currency,
     })
+    emit_to_user(user.id, "WALLET_BALANCE_UPDATED",
+                 {"balance": balance, "currency": wallet.currency})
 
     # Simulate an asynchronous provider response. The database remains the source
     # of truth; the socket only delivers the result once it is persisted.
@@ -351,38 +419,40 @@ def _complete_provider_operation(transaction_id: int, user_id: int,
 
         if provider_success:
             wallet = wallet_service.get_wallet(db, user_id)
-            charge = txn.amount + txn.fee
-            if wallet.balance < charge:
-                _fail(db, txn, user_id, "INSUFFICIENT_BALANCE",
-                      "Insufficient balance at settlement.")
-                return
+            # Funds (amount + fee) were already held at confirm time.
+            if not wallet_service.has_debit_for_txn(db, txn.id):
+                charge = wallet_service.total_charge(txn)
+                if wallet.balance < charge:
+                    _fail(db, txn, user_id, "INSUFFICIENT_BALANCE",
+                          "Insufficient balance at settlement.")
+                    return
+                wallet_service.debit_with_fee(db, wallet, txn, txn.description)
             txn.provider_reference = "prov_" + uuid.uuid4().hex[:12]
-            wallet.balance -= charge
-            db.add(
-                LedgerEntry(
-                    wallet_id=wallet.id,
-                    transaction_id=txn.id,
-                    direction="DEBIT",
-                    amount=charge,
-                    balance_after=wallet.balance,
-                    description=txn.description,
-                )
-            )
             txn.status = TransactionStatus.SUCCESS.value
             txn.completed_at = _now()
             wallet_service.record_event(db, txn, "TRANSACTION_SUCCESS",
                                         TransactionStatus.PROCESSING.value,
                                         TransactionStatus.SUCCESS.value,
-                                        {"balance_after": wallet.balance})
+                                        {"balance_after": wallet.balance, "fee": txn.fee})
             notification = create_notification(
                 db,
                 user_id=user_id,
                 type="BILL_PAYMENT_SUCCESS",
                 title="Payment Successful",
-                message=f"Your electricity payment of {txn.amount / 100:,.2f} {txn.currency} was successful.",
+                message=(
+                    f"Your electricity payment of {txn.amount / 100:,.2f} {txn.currency} "
+                    f"was successful (fee {txn.fee / 100:,.2f})."
+                ),
                 priority="HIGH",
-                data={"transaction_id": txn.id, "amount": txn.amount},
+                data={
+                    "transaction_id": txn.id,
+                    "amount": txn.amount,
+                    "fee": txn.fee,
+                    "category": "electricity",
+                },
             )
+            from app.services import limit_service
+            limit_service.record_debit_against_grant(db, user_id, txn.amount)
             db.commit()
             db.refresh(txn)
             db.refresh(wallet)
@@ -410,13 +480,19 @@ def _complete_provider_operation(transaction_id: int, user_id: int,
 
 def _fail(db: Session, txn: Transaction, user_id: int, reason_code: str,
           message: str) -> None:
+    wallet = wallet_service.get_wallet(db, user_id)
+    # Release any held amount + fee.
+    if wallet_service.has_debit_for_txn(db, txn.id):
+        balance = wallet_service.refund_charge(db, wallet, txn)
+    else:
+        balance = wallet.balance
     txn.status = TransactionStatus.FAILED.value
     txn.failure_reason = message
     txn.completed_at = _now()
     wallet_service.record_event(db, txn, "TRANSACTION_FAILED",
                                 TransactionStatus.PROCESSING.value,
                                 TransactionStatus.FAILED.value,
-                                {"reason_code": reason_code})
+                                {"reason_code": reason_code, "refunded": True})
     notification = create_notification(
         db,
         user_id=user_id,
@@ -424,7 +500,11 @@ def _fail(db: Session, txn: Transaction, user_id: int, reason_code: str,
         title="Payment Failed",
         message=message,
         priority="HIGH",
-        data={"transaction_id": txn.id, "reason_code": reason_code},
+        data={
+            "transaction_id": txn.id,
+            "reason_code": reason_code,
+            "category": "electricity",
+        },
     )
     db.commit()
     db.refresh(txn)
@@ -436,4 +516,99 @@ def _fail(db: Session, txn: Transaction, user_id: int, reason_code: str,
         "transaction_id": txn.id, "reference": txn.reference, "status": txn.status,
         "reason_code": reason_code, "retryable": True,
     })
+    emit_to_user(user_id, "WALLET_BALANCE_UPDATED",
+                 {"balance": balance, "currency": wallet.currency})
     deliver_notification(notification)
+
+
+def category_label_safe(category: str) -> str:
+    return catalog_service.category_label(category)
+
+
+def _require_fields(provider, *, phone, amount, message) -> None:
+    fields = catalog_service.provider_public_fields(provider)
+    values = {"phone": phone, "amount": amount, "message": message}
+    for field in fields:
+        key = field["key"]
+        enabled = field.get("enabled", True)
+        required = field.get("required", False)
+        val = values.get(key)
+        if not enabled:
+            if key == "phone" and val:
+                raise ValidationError(
+                    f"Field '{key}' is not enabled for this provider.",
+                    code="FIELD_DISABLED",
+                )
+            if key == "amount" and val is not None:
+                raise ValidationError(
+                    f"Field '{key}' is not enabled for this provider.",
+                    code="FIELD_DISABLED",
+                )
+            if key == "message" and val:
+                raise ValidationError(
+                    f"Field '{key}' is not enabled for this provider.",
+                    code="FIELD_DISABLED",
+                )
+            continue
+        if required:
+            if key == "amount" and (val is None or int(val) <= 0):
+                raise ValidationError("Amount is required.", code="FIELD_REQUIRED")
+            if key in ("phone", "message") and not (val or "").strip():
+                raise ValidationError(
+                    f"{field.get('label') or key} is required.",
+                    code="FIELD_REQUIRED",
+                )
+
+
+def pay(
+    db: Session,
+    user: User,
+    *,
+    category: str,
+    provider_id: str,
+    phone: str | None = None,
+    amount: int | None = None,
+    message: str | None = None,
+    pin: str,
+    validation_token: str | None = None,
+    idempotency_key: str | None = None,
+) -> Transaction:
+    """Unified checkout: map phone/amount/message onto the provider flow."""
+    category = catalog_service.normalize_category(category)
+    provider = catalog_service.get_provider(db, category, provider_id)
+    if not provider or not provider.enabled:
+        raise ValidationError("Unknown provider.", code="UNKNOWN_PROVIDER")
+
+    _require_fields(provider, phone=phone, amount=amount, message=message)
+
+    if provider.flow == "direct_topup":
+        return confirm_topup(
+            db,
+            user,
+            category,
+            provider_id,
+            (phone or "").strip(),
+            int(amount or 0),
+            pin,
+            idempotency_key,
+            message=message,
+        )
+
+    if provider.flow == "validate_pay":
+        if not validation_token:
+            raise ValidationError(
+                "Validate the account first.",
+                code="VALIDATION_REQUIRED",
+            )
+        return confirm_electricity(
+            db,
+            user,
+            validation_token=validation_token,
+            amount=int(amount or 0),
+            pin=pin,
+            idempotency_key=idempotency_key,
+            message=message,
+            category=category,
+        )
+
+    raise ValidationError("Unsupported provider flow.", code="INVALID_PROVIDER_FLOW")

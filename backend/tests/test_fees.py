@@ -101,8 +101,10 @@ def test_disabled_service_hidden_from_front_store(client, admin_token):
                json={"enabled": False})
     user = register_active_user(client)
     services = client.get(f"{API}/services", headers=auth_headers(user["access_token"])).json()
-    elec = next(s for s in services["services"] if s["id"] == "electricity")
-    assert elec["enabled"] is False
+    ids = {s["id"] for s in services["services"]}
+    assert "electricity" not in ids
+    # Enabled services remain visible.
+    assert "airtime" in ids or "data" in ids
 
 
 def test_admin_endpoints_require_admin(client):

@@ -1,6 +1,7 @@
 import datetime as dt
 import uuid
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -22,9 +23,14 @@ def _now() -> dt.datetime:
 def _is_campay_txn(txn: Transaction) -> bool:
     from app.integrations.campay import is_campay_reference
 
-    return txn.type in ("ADD_MONEY", "WITHDRAW") and is_campay_reference(
-        txn.provider_reference
-    )
+    return txn.type in (
+        "ADD_MONEY",
+        "WITHDRAW",
+        "MONEY_REQUEST_COLLECT",
+        "CAMPAY_COLLECT",
+        "CAMPAY_WITHDRAW",
+    ) and is_campay_reference(txn.provider_reference)
+
 
 
 def _provider_inquiry(txn: Transaction, db: Session) -> tuple[str, dict]:
@@ -85,12 +91,26 @@ def apply_campay_outcome(
                 "external_reference": txn.reference,
             },
             transaction=txn,
-            endpoint="collect" if txn.type == "ADD_MONEY" else "withdraw",
+            endpoint=(
+                "collect"
+                if txn.type in ("ADD_MONEY", "MONEY_REQUEST_COLLECT", "CAMPAY_COLLECT")
+                else "withdraw"
+            ),
             notify=False,
         )
 
-    if txn.type == "ADD_MONEY":
-        if outcome == "SUCCESS":
+    if txn.type in ("ADD_MONEY", "MONEY_REQUEST_COLLECT"):
+        from app.services import social_service
+
+        money_req = social_service.find_request_by_collect_txn(db, txn.id)
+        if money_req or txn.type == "MONEY_REQUEST_COLLECT":
+            if outcome == "SUCCESS":
+                social_service.settle_money_request_campay_success(db, txn)
+            else:
+                social_service.settle_money_request_campay_failed(
+                    db, txn, reason or "Mobile money payment failed."
+                )
+        elif outcome == "SUCCESS":
             wallet_service.settle_campay_deposit_success(db, txn)
         else:
             wallet_service.settle_campay_deposit_failed(
@@ -103,6 +123,9 @@ def apply_campay_outcome(
             transfers_service.settle_campay_withdraw_failed(
                 db, txn, reason or "Withdrawal failed at provider."
             )
+    elif txn.type in ("CAMPAY_COLLECT", "CAMPAY_WITHDRAW"):
+        # Trace-only Campay rows (admin sandbox) — update status, no wallet move.
+        _settle_campay_trace_only(db, txn, outcome, reason)
     else:
         return False
 
@@ -111,6 +134,28 @@ def apply_campay_outcome(
         campay_payment_service.notify_parties(db, payment, transaction=txn)
         db.commit()
     return True
+
+
+def _settle_campay_trace_only(
+    db: Session,
+    txn: Transaction,
+    outcome: str,
+    reason: str | None = None,
+) -> None:
+    prev = txn.status
+    if outcome == "SUCCESS":
+        txn.status = TransactionStatus.SUCCESS.value
+        txn.failure_reason = None
+        event = "TRANSACTION_SUCCESS"
+        new = TransactionStatus.SUCCESS.value
+    else:
+        txn.status = TransactionStatus.FAILED.value
+        txn.failure_reason = (reason or "Provider reported failure.")[:255]
+        event = "TRANSACTION_FAILED"
+        new = TransactionStatus.FAILED.value
+    txn.completed_at = _now()
+    txn.pending_reconciliation = False
+    wallet_service.record_event(db, txn, event, prev, new, {"provider": "campay", "trace_only": True})
 
 
 def find_txn_for_campay(
@@ -129,7 +174,17 @@ def find_txn_for_campay(
     if campay_reference:
         txn = (
             q.filter(Transaction.provider_reference == campay_reference)
-            .filter(Transaction.type.in_(("ADD_MONEY", "WITHDRAW")))
+            .filter(
+                Transaction.type.in_(
+                    (
+                        "ADD_MONEY",
+                        "WITHDRAW",
+                        "MONEY_REQUEST_COLLECT",
+                        "CAMPAY_COLLECT",
+                        "CAMPAY_WITHDRAW",
+                    )
+                )
+            )
             .order_by(Transaction.id.desc())
             .first()
         )
@@ -256,16 +311,177 @@ def _reconcile_one(db: Session, txn: Transaction) -> bool:
     return True
 
 
+NON_TERMINAL_STATUSES = frozenset({
+    TransactionStatus.CREATED.value,
+    TransactionStatus.PENDING.value,
+    TransactionStatus.PROCESSING.value,
+})
+
+
+def _status_str(value) -> str:
+    if value is None:
+        return ""
+    return value.value if hasattr(value, "value") else str(value)
+
+
+def describe_provider_action(mapped: str, finpay_status: str, txn_type: str) -> dict:
+    """Explain what admin should do after a Campay status check."""
+    mapped = (mapped or "PENDING").upper()
+    finpay = (finpay_status or "").upper()
+    t = (txn_type or "").upper()
+
+    if mapped == "PENDING":
+        return {
+            "needs_reconciliation": False,
+            "action_required": "Campay is still processing. Re-check later — no FinPay update yet.",
+            "action_label": None,
+        }
+
+    if mapped == "SUCCESS" and finpay in NON_TERMINAL_STATUSES:
+        if t in ("ADD_MONEY", "MONEY_REQUEST_COLLECT", "CAMPAY_COLLECT"):
+            action = (
+                "Reconcile to credit the beneficiary wallet and mark this FinPay "
+                "transaction SUCCESS."
+            )
+        elif t in ("WITHDRAW", "CAMPAY_WITHDRAW"):
+            action = "Reconcile to finalize the withdrawal and mark FinPay SUCCESS."
+        else:
+            action = "Reconcile to apply Campay SUCCESS and update the FinPay status."
+        return {
+            "needs_reconciliation": True,
+            "action_required": action,
+            "action_label": "Reconcile & credit",
+        }
+
+    if mapped == "FAILED" and finpay in NON_TERMINAL_STATUSES:
+        return {
+            "needs_reconciliation": True,
+            "action_required": (
+                "Reconcile to mark this FinPay transaction FAILED "
+                "(no wallet credit)."
+            ),
+            "action_label": "Reconcile as failed",
+        }
+
+    if mapped == "SUCCESS" and finpay == TransactionStatus.SUCCESS.value:
+        return {
+            "needs_reconciliation": False,
+            "action_required": "Already in sync — FinPay is SUCCESS. No action required.",
+            "action_label": None,
+        }
+
+    if mapped == "FAILED" and finpay == TransactionStatus.FAILED.value:
+        return {
+            "needs_reconciliation": False,
+            "action_required": "Already in sync — FinPay is FAILED. No action required.",
+            "action_label": None,
+        }
+
+    return {
+        "needs_reconciliation": True,
+        "action_required": (
+            f"Status mismatch: Campay is {mapped} but FinPay is {finpay}. "
+            "Review carefully, then reconcile if the provider result should win."
+        ),
+        "action_label": "Force reconcile",
+    }
+
+
+def admin_reconcile_transaction(db: Session, txn: Transaction) -> tuple[bool, str, dict]:
+    """Re-query Campay and settle the FinPay ledger for admin reconciliation.
+
+    Returns (settled, mapped_status, provider_payload).
+    """
+    from app.integrations.campay import (
+        campay_credentials_ready,
+        get_campay_client,
+        is_campay_reference,
+        map_campay_status,
+    )
+
+    if not campay_credentials_ready():
+        from app.core.exceptions import AppError
+
+        raise AppError(
+            "Campay is not configured. Set CAMPAY_USERNAME and CAMPAY_PASSWORD.",
+            code="CAMPAY_NOT_CONFIGURED",
+            status_code=503,
+        )
+    if not txn.provider_reference or not is_campay_reference(txn.provider_reference):
+        from app.core.exceptions import ValidationError
+
+        raise ValidationError(
+            "This transaction has no Campay provider reference to reconcile.",
+            code="NO_PROVIDER_REFERENCE",
+        )
+
+    data = get_campay_client().get_transaction(txn.provider_reference)
+    mapped = map_campay_status(data.get("status"))
+    if mapped == "PENDING":
+        from app.core.exceptions import ValidationError
+
+        raise ValidationError(
+            "Campay is still pending — cannot reconcile until SUCCESSFUL or FAILED.",
+            code="PROVIDER_STILL_PENDING",
+        )
+
+    settled = bool(
+        apply_campay_outcome(
+            db,
+            txn,
+            mapped,
+            reason=data.get("reason"),
+            payload=data,
+        )
+    )
+    if not settled:
+        from app.core.exceptions import ValidationError
+
+        raise ValidationError(
+            f"Could not settle transaction type {txn.type} from Campay {mapped}.",
+            code="RECONCILE_UNSUPPORTED",
+        )
+    db.refresh(txn)
+    return settled, mapped, data
+
+
 def _claim_next(db: Session, extra_filters) -> Transaction | None:
     """Claim one pending transaction with FOR UPDATE NOWAIT so that
     concurrent workers (in-process + Celery) never process the same row."""
     q = db.query(Transaction).filter(
         Transaction.pending_reconciliation.is_(True),
-        Transaction.status == TransactionStatus.PENDING.value,
+        Transaction.status.in_(
+            (
+                TransactionStatus.PENDING.value,
+                TransactionStatus.PROCESSING.value,
+            )
+        ),
         *extra_filters,
     )
     try:
         return q.order_by(Transaction.id).with_for_update(nowait=True).first()
+    except Exception:
+        db.rollback()
+        return None
+
+
+def _claim_txn(db: Session, txn_id: int) -> Transaction | None:
+    try:
+        return (
+            db.query(Transaction)
+            .filter(
+                Transaction.id == txn_id,
+                Transaction.pending_reconciliation.is_(True),
+                Transaction.status.in_(
+                    (
+                        TransactionStatus.PENDING.value,
+                        TransactionStatus.PROCESSING.value,
+                    )
+                ),
+            )
+            .with_for_update(nowait=True)
+            .one_or_none()
+        )
     except Exception:
         db.rollback()
         return None
@@ -293,8 +509,10 @@ def reconcile_pending(db: Session, min_age_seconds: float | None = None) -> int:
 
 
 def reconcile_for_user(db: Session, user_id: int) -> int:
-    """Immediately reconcile a specific user's pending transactions (used for
-    application-open / network-recovery flows)."""
+    """Immediately reconcile a user's pending wallet txns and any money-request
+    Campay collects they are party to (payer or requester)."""
+    from app.models.social import MoneyRequest
+
     settled = 0
     while True:
         txn = _claim_next(db, [Transaction.user_id == user_id])
@@ -307,6 +525,35 @@ def reconcile_for_user(db: Session, user_id: int) -> int:
             logger.exception("User reconcile failed for txn=%s", txn.id)
             db.rollback()
             break
+
+    # Money-request collects live on the payer's user_id; the requester must
+    # still be able to nudge settlement while waiting on PROCESSING.
+    open_reqs = (
+        db.query(MoneyRequest)
+        .filter(
+            MoneyRequest.status == "PROCESSING",
+            MoneyRequest.collect_transaction_id.isnot(None),
+            or_(
+                MoneyRequest.payer_id == user_id,
+                MoneyRequest.requester_id == user_id,
+            ),
+        )
+        .all()
+    )
+    for req in open_reqs:
+        txn = _claim_txn(db, int(req.collect_transaction_id))
+        if txn is None:
+            continue
+        try:
+            if _reconcile_one(db, txn):
+                settled += 1
+        except Exception:  # pragma: no cover - defensive
+            logger.exception(
+                "Money-request collect reconcile failed for txn=%s req=%s",
+                txn.id,
+                req.id,
+            )
+            db.rollback()
     return settled
 
 

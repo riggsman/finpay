@@ -119,54 +119,105 @@ def campay_test_collect(
     db: Session = Depends(get_db),
 ):
     _require_campay()
-    from app.services import campay_payment_service
+    import datetime as dt
+
+    from app.models.transaction import Transaction, TransactionStatus
+    from app.services import campay_payment_service, wallet_service
 
     ext = f"admin-test-collect-{uuid.uuid4().hex[:12]}"
+    msisdn = normalize_msisdn(payload.phone)
+    amount_minor = int(payload.amount) * 100
+    txn = Transaction(
+        reference="txn_" + uuid.uuid4().hex[:16],
+        user_id=admin.id,
+        type="CAMPAY_COLLECT",
+        status=TransactionStatus.CREATED.value,
+        amount=amount_minor,
+        fee=0,
+        currency="XAF",
+        description=f"Admin Campay collect test ({msisdn})",
+    )
+    db.add(txn)
+    db.flush()
+    wallet_service.record_event(
+        db, txn, "TRANSACTION_CREATED", None, TransactionStatus.CREATED.value
+    )
+    txn.status = TransactionStatus.PROCESSING.value
+    wallet_service.record_event(
+        db,
+        txn,
+        "TRANSACTION_PROCESSING",
+        TransactionStatus.CREATED.value,
+        TransactionStatus.PROCESSING.value,
+        {"provider": "campay", "sandbox": True},
+    )
+    db.flush()
+
     result = get_campay_client().collect(
         amount_xaf=int(payload.amount),
         phone=payload.phone,
-        description="FinPay admin Campay collect test",
-        external_reference=ext,
+        description=txn.description,
+        external_reference=txn.reference,
     )
     ref = str(result.get("reference") or "").strip()
-    if ref:
-        campay_payment_service.record_initiate(
-            db,
-            reference=ref,
-            endpoint="collect",
-            user_id=admin.id,
-            transaction_id=None,
-            external_reference=ext,
-            phone_number=payload.phone,
-            amount_minor=int(payload.amount) * 100,
-            currency="XAF",
-            operator=result.get("operator"),
-            raw=result,
-        )
-        campay_payment_service.apply_status_payload(
-            db, {**result, "external_reference": ext, "endpoint": "collect"},
-            user_id=admin.id,
-            endpoint="collect",
-            notify=False,
-        )
+    if not ref:
+        txn.status = TransactionStatus.FAILED.value
+        txn.failure_reason = "Campay did not return a transaction reference."
+        txn.completed_at = dt.datetime.now(dt.timezone.utc)
+        db.commit()
+        db.refresh(txn)
+        raise ValidationError(txn.failure_reason, code="CAMPAY_ERROR")
+
+    txn.provider_reference = ref
+    txn.status = TransactionStatus.PENDING.value
+    txn.pending_reconciliation = True
+    campay_payment_service.record_initiate(
+        db,
+        reference=ref,
+        endpoint="collect",
+        user_id=admin.id,
+        transaction_id=txn.id,
+        external_reference=txn.reference,
+        phone_number=msisdn,
+        amount_minor=amount_minor,
+        currency="XAF",
+        operator=result.get("operator"),
+        raw=result,
+    )
+    campay_payment_service.apply_status_payload(
+        db, {**result, "external_reference": txn.reference, "endpoint": "collect"},
+        transaction=txn,
+        endpoint="collect",
+        notify=False,
+    )
+    wallet_service.record_event(
+        db,
+        txn,
+        "TRANSACTION_PENDING",
+        TransactionStatus.PROCESSING.value,
+        TransactionStatus.PENDING.value,
+        {"provider": "campay", "campay_reference": ref, "sandbox": True},
+    )
     audit_service.record(
         db,
         "CAMPAY_TEST_COLLECT",
         user_id=admin.id,
-        entity_type="campay",
-        entity_id=str(result.get("reference") or ext),
-        meta={"amount": payload.amount, "phone": normalize_msisdn(payload.phone), "external_reference": ext},
+        entity_type="transaction",
+        entity_id=txn.id,
+        meta={"amount": payload.amount, "phone": msisdn, "campay_reference": ref},
     )
     db.commit()
+    db.refresh(txn)
     return {
         "ok": True,
-        "external_reference": ext,
-        "reference": result.get("reference"),
+        "transaction_id": txn.id,
+        "external_reference": txn.reference,
+        "reference": ref,
         "status": result.get("status") or "PENDING",
         "ussd_code": result.get("ussd_code"),
         "operator": result.get("operator"),
         "raw": result,
-        "note": "Live Campay call; does not credit FinPay wallets. Status updates persist to campay_payments.",
+        "note": "Recorded in transactions as CAMPAY_COLLECT (trace only — no wallet credit).",
     }
 
 
@@ -177,52 +228,102 @@ def campay_test_withdraw(
     db: Session = Depends(get_db),
 ):
     _require_campay()
-    from app.services import campay_payment_service
+    import datetime as dt
 
-    ext = f"admin-test-withdraw-{uuid.uuid4().hex[:12]}"
+    from app.models.transaction import Transaction, TransactionStatus
+    from app.services import campay_payment_service, wallet_service
+
+    msisdn = normalize_msisdn(payload.phone)
+    amount_minor = int(payload.amount) * 100
+    txn = Transaction(
+        reference="txn_" + uuid.uuid4().hex[:16],
+        user_id=admin.id,
+        type="CAMPAY_WITHDRAW",
+        status=TransactionStatus.CREATED.value,
+        amount=amount_minor,
+        fee=0,
+        currency="XAF",
+        description=f"Admin Campay withdraw test ({msisdn})",
+    )
+    db.add(txn)
+    db.flush()
+    wallet_service.record_event(
+        db, txn, "TRANSACTION_CREATED", None, TransactionStatus.CREATED.value
+    )
+    txn.status = TransactionStatus.PROCESSING.value
+    wallet_service.record_event(
+        db,
+        txn,
+        "TRANSACTION_PROCESSING",
+        TransactionStatus.CREATED.value,
+        TransactionStatus.PROCESSING.value,
+        {"provider": "campay", "sandbox": True},
+    )
+    db.flush()
+
     result = get_campay_client().withdraw(
         amount_xaf=int(payload.amount),
         phone=payload.phone,
-        description="FinPay admin Campay withdraw test",
-        external_reference=ext,
+        description=txn.description,
+        external_reference=txn.reference,
     )
     ref = str(result.get("reference") or "").strip()
-    if ref:
-        campay_payment_service.record_initiate(
-            db,
-            reference=ref,
-            endpoint="withdraw",
-            user_id=admin.id,
-            transaction_id=None,
-            external_reference=ext,
-            phone_number=payload.phone,
-            amount_minor=int(payload.amount) * 100,
-            currency="XAF",
-            operator=result.get("operator"),
-            raw=result,
-        )
-        campay_payment_service.apply_status_payload(
-            db, {**result, "external_reference": ext, "endpoint": "withdraw"},
-            user_id=admin.id,
-            endpoint="withdraw",
-            notify=False,
-        )
+    if not ref:
+        txn.status = TransactionStatus.FAILED.value
+        txn.failure_reason = "Campay did not return a transaction reference."
+        txn.completed_at = dt.datetime.now(dt.timezone.utc)
+        db.commit()
+        db.refresh(txn)
+        raise ValidationError(txn.failure_reason, code="CAMPAY_ERROR")
+
+    txn.provider_reference = ref
+    txn.status = TransactionStatus.PENDING.value
+    txn.pending_reconciliation = True
+    campay_payment_service.record_initiate(
+        db,
+        reference=ref,
+        endpoint="withdraw",
+        user_id=admin.id,
+        transaction_id=txn.id,
+        external_reference=txn.reference,
+        phone_number=msisdn,
+        amount_minor=amount_minor,
+        currency="XAF",
+        operator=result.get("operator"),
+        raw=result,
+    )
+    campay_payment_service.apply_status_payload(
+        db, {**result, "external_reference": txn.reference, "endpoint": "withdraw"},
+        transaction=txn,
+        endpoint="withdraw",
+        notify=False,
+    )
+    wallet_service.record_event(
+        db,
+        txn,
+        "TRANSACTION_PENDING",
+        TransactionStatus.PROCESSING.value,
+        TransactionStatus.PENDING.value,
+        {"provider": "campay", "campay_reference": ref, "sandbox": True},
+    )
     audit_service.record(
         db,
         "CAMPAY_TEST_WITHDRAW",
         user_id=admin.id,
-        entity_type="campay",
-        entity_id=str(result.get("reference") or ext),
-        meta={"amount": payload.amount, "phone": normalize_msisdn(payload.phone), "external_reference": ext},
+        entity_type="transaction",
+        entity_id=txn.id,
+        meta={"amount": payload.amount, "phone": msisdn, "campay_reference": ref},
     )
     db.commit()
+    db.refresh(txn)
     return {
         "ok": True,
-        "external_reference": ext,
-        "reference": result.get("reference"),
+        "transaction_id": txn.id,
+        "external_reference": txn.reference,
+        "reference": ref,
         "status": result.get("status") or "PENDING",
         "raw": result,
-        "note": "Live Campay call; does not debit FinPay wallets. Status updates persist to campay_payments.",
+        "note": "Recorded in transactions as CAMPAY_WITHDRAW (trace only — no wallet debit).",
     }
 
 

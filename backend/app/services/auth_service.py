@@ -56,21 +56,51 @@ def initiate_registration(db: Session, phone: str) -> tuple[OtpCode, bool]:
     return otp, account_exists
 
 
+def deliver_registration_otp(db: Session, phone: str, code: str) -> bool:
+    """Email the registration OTP to the account's @local.dev address."""
+    user = db.query(User).filter(User.phone == phone).one_or_none()
+    if not user or not user.email:
+        return False
+    from app.notifications.email import send_email
+    from app.services import catalog_service
+
+    from_name = catalog_service.get_str(db, "email_from_name", "FinPay")
+    ttl_min = max(1, settings.OTP_TTL_SECONDS // 60)
+    return send_email(
+        user.email,
+        f"Your {from_name} verification code",
+        (
+            f"Hi {user.first_name or 'there'},\n\n"
+            f"Your FinPay verification code is: {code}\n\n"
+            f"It expires in {ttl_min} minute(s).\n"
+            "If you did not create an account, you can ignore this email.\n\n"
+            f"— {from_name}"
+        ),
+        from_name=from_name,
+    )
+
+
 def register_user(db: Session, data) -> User:
+    from app.services.user_email import allocate_user_email
+
     existing = db.query(User).filter(User.phone == data.phone).one_or_none()
     if existing and existing.status == UserStatus.ACTIVE:
         raise ConflictError("An account with this phone number already exists.",
                             code="ACCOUNT_EXISTS")
 
-    if data.email:
-        email_owner = db.query(User).filter(User.email == data.email).one_or_none()
-        if email_owner and email_owner.phone != data.phone:
-            raise ConflictError("Email already in use.", code="EMAIL_EXISTS")
+    email = allocate_user_email(
+        db,
+        first_name=data.first_name,
+        phone=data.phone,
+        preferred=data.email,
+        exclude_user_id=existing.id if existing else None,
+    )
 
     user = existing or User(phone=data.phone)
     user.first_name = data.first_name
     user.last_name = data.last_name
-    user.email = data.email
+    user.email = email
+    user.email_verified = True  # shared test domain is always deliverable locally
     user.password_hash = hash_password(data.password)
     user.status = UserStatus.PENDING_VERIFICATION
     db.add(user)
@@ -120,10 +150,7 @@ def verify_otp(db: Session, phone: str, code: str) -> User:
     # Apply Back Office-configured default transaction limits.
     from app.services import catalog_service
 
-    user.per_txn_limit = catalog_service.get_int(
-        db, "default_per_txn_limit", settings.DEFAULT_PER_TXN_LIMIT)
-    user.daily_limit = catalog_service.get_int(
-        db, "default_daily_limit", settings.DEFAULT_DAILY_LIMIT)
+    user.per_txn_limit, user.daily_limit = catalog_service.default_limits(db)
 
     # Provision a wallet on activation (idempotent).
     wallet = db.query(Wallet).filter(Wallet.user_id == user.id).one_or_none()
@@ -153,4 +180,20 @@ def login(db: Session, identifier: str, password: str) -> tuple[User, str, str]:
     db.add(RefreshToken(user_id=user.id, jti=jti, expires_at=expires_at))
     user.last_login_at = _now()
     db.flush()
+    return user, access, refresh
+
+
+def admin_login(db: Session, identifier: str, password: str) -> tuple[User, str, str]:
+    """Authenticate via the dedicated admin login endpoint.
+
+    Only users with ``is_admin=True`` may sign in here. Customer accounts
+    must use ``POST /auth/login``.
+    """
+    user, access, refresh = login(db, identifier, password)
+    if not user.is_admin:
+        raise AuthError(
+            "Administrator access required. Use the customer login for personal accounts.",
+            code="ADMIN_ACCESS_REQUIRED",
+            status_code=403,
+        )
     return user, access, refresh

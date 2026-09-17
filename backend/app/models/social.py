@@ -33,10 +33,21 @@ class MoneyRequest(Base):
     amount: Mapped[int] = mapped_column(BigInteger, nullable=False)
     currency: Mapped[str] = mapped_column(String(8), default="XAF", nullable=False)
     note: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # PENDING, PAID, DECLINED, CANCELLED
+    # PENDING | PROCESSING | PAID | DECLINED | CANCELLED | FAILED
     status: Mapped[str] = mapped_column(String(20), default="PENDING", nullable=False)
+    # WALLET | CAMPAY once the payer has validated
+    funding_mode: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Requester-side history row (MONEY_REQUEST_OUT → TRANSFER_RECEIVED on settle)
     transaction_id: Mapped[int | None] = mapped_column(
         ForeignKey("transactions.id"), nullable=True
+    )
+    # Payer-side history row (MONEY_REQUEST_IN → SEND_MONEY on wallet settle)
+    payer_transaction_id: Mapped[int | None] = mapped_column(
+        ForeignKey("transactions.id"), nullable=True
+    )
+    # Campay collect txn on the payer when funding_mode=CAMPAY
+    collect_transaction_id: Mapped[int | None] = mapped_column(
+        ForeignKey("transactions.id"), index=True, nullable=True
     )
     created_at: Mapped[dt.datetime] = mapped_column(
         UTCDateTime(), default=lambda: dt.datetime.now(dt.timezone.utc), nullable=False

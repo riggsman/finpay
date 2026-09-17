@@ -139,6 +139,15 @@ export default function BackOffice() {
   const [campayStatusRef, setCampayStatusRef] = useState("");
   const [campayTxnStatus, setCampayTxnStatus] = useState(null);
   const [campayBusy, setCampayBusy] = useState(false);
+  const [verifyBusyId, setVerifyBusyId] = useState(null);
+  const [reconcileModal, setReconcileModal] = useState(null);
+  const [reconcileBusy, setReconcileBusy] = useState(false);
+  const [tickets, setTickets] = useState([]);
+  const [ticketFilter, setTicketFilter] = useState("IN_PROGRESS");
+  const [selectedTicket, setSelectedTicket] = useState(null);
+  const [ticketReply, setTicketReply] = useState("");
+  const [ticketShotUrl, setTicketShotUrl] = useState(null);
+  const [ticketBusy, setTicketBusy] = useState(false);
   const LIST_LIMIT = 500;
 
   function loadProviders() {
@@ -178,11 +187,126 @@ export default function BackOffice() {
     setTxns(rows);
   }
 
+  async function verifyProviderTxn(txnId) {
+    setMsg(null);
+    setVerifyBusyId(txnId);
+    try {
+      const r = await adminApi.verifyTransactionProvider(txnId);
+      setTxns((prev) =>
+        prev.map((t) => (t.id === txnId && r.transaction ? { ...t, ...r.transaction } : t))
+      );
+      setReconcileModal({
+        transactionId: txnId,
+        provider_status: r.provider_status,
+        mapped_status: r.mapped_status,
+        previous_status: r.previous_status,
+        finpay_status: r.finpay_status || r.transaction?.status,
+        settled: !!r.settled,
+        needs_reconciliation: !!r.needs_reconciliation,
+        action_required: r.action_required,
+        action_label: r.action_label,
+        settle_error: r.settle_error,
+        transaction: r.transaction,
+      });
+    } catch (err) {
+      setMsg(err.message);
+    } finally {
+      setVerifyBusyId(null);
+    }
+  }
+
+  async function reconcileFromModal() {
+    if (!reconcileModal?.transactionId) return;
+    const txnId = reconcileModal.transactionId;
+    setReconcileBusy(true);
+    setMsg(null);
+    try {
+      const r = await adminApi.reconcileTransaction(txnId);
+      setTxns((prev) =>
+        prev.map((t) => (t.id === txnId && r.transaction ? { ...t, ...r.transaction } : t))
+      );
+      setReconcileModal({
+        transactionId: txnId,
+        provider_status: r.provider_status,
+        mapped_status: r.mapped_status,
+        previous_status: r.previous_status,
+        finpay_status: r.finpay_status || r.transaction?.status,
+        settled: !!r.settled,
+        needs_reconciliation: false,
+        action_required: r.action_required,
+        action_label: null,
+        transaction: r.transaction,
+      });
+    } catch (err) {
+      setReconcileModal((prev) =>
+        prev
+          ? { ...prev, settle_error: err.message, action_required: err.message }
+          : prev
+      );
+    } finally {
+      setReconcileBusy(false);
+    }
+  }
+
   async function loadLimitRequests(status = limitFilter) {
     const params = {};
     if (status && status !== "ALL") params.status = status;
     const rows = await adminApi.listLimitRequests(params);
     setLimitRequests(rows);
+  }
+
+  async function loadTickets(status = ticketFilter) {
+    const params = { limit: LIST_LIMIT };
+    if (status && status !== "ALL") params.status = status;
+    const rows = await adminApi.listTickets(params);
+    setTickets(rows);
+  }
+
+  async function openTicket(id) {
+    setTicketBusy(true);
+    setTicketReply("");
+    try {
+      const detail = await adminApi.getTicket(id);
+      setSelectedTicket(detail);
+    } catch (err) {
+      setMsg(err.message);
+    } finally {
+      setTicketBusy(false);
+    }
+  }
+
+  async function sendTicketReply(e) {
+    e.preventDefault();
+    if (!selectedTicket || !ticketReply.trim()) return;
+    setTicketBusy(true);
+    setMsg(null);
+    try {
+      await adminApi.replyTicket(selectedTicket.id, ticketReply.trim());
+      setTicketReply("");
+      await openTicket(selectedTicket.id);
+      await loadTickets();
+      setMsg(`Replied to ${selectedTicket.reference}.`);
+    } catch (err) {
+      setMsg(err.message);
+    } finally {
+      setTicketBusy(false);
+    }
+  }
+
+  async function setTicketStatus(status) {
+    if (!selectedTicket) return;
+    setTicketBusy(true);
+    setMsg(null);
+    try {
+      await adminApi.updateTicketStatus(selectedTicket.id, status);
+      await openTicket(selectedTicket.id);
+      await loadTickets();
+      setMsg(`Ticket ${selectedTicket.reference} marked ${status}.`);
+    } catch (err) {
+      setMsg(err.message);
+    } finally {
+      setTicketBusy(false);
+    }
   }
 
   useEffect(() => {
@@ -204,10 +328,45 @@ export default function BackOffice() {
     if (tab === "kyc") loadKyc().catch((e) => setMsg(e.message));
     if (tab === "transactions") loadTxns().catch((e) => setMsg(e.message));
     if (tab === "limits") loadLimitRequests().catch((e) => setMsg(e.message));
+    if (tab === "tickets") loadTickets().catch((e) => setMsg(e.message));
     if (tab === "campay") {
       adminApi.campayStatus().then(setCampayStatus).catch((e) => setMsg(e.message));
     }
-  }, [user, tab, limitFilter]);
+  }, [user, tab, limitFilter, ticketFilter]);
+
+  useEffect(() => {
+    let revoked = false;
+    let url = null;
+    if (!selectedTicket?.has_screenshot) {
+      setTicketShotUrl(null);
+      return undefined;
+    }
+    (async () => {
+      try {
+        const { getAccessToken } = await import("../api/client");
+        const token = getAccessToken();
+        const res = await fetch(
+          `/api/v1/admin/tickets/${selectedTicket.id}/screenshot`,
+          { headers: token ? { Authorization: `Bearer ${token}` } : {} }
+        );
+        if (!res.ok) return;
+        const blob = await res.blob();
+        const objectUrl = URL.createObjectURL(blob);
+        if (revoked) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        url = objectUrl;
+        setTicketShotUrl(objectUrl);
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      revoked = true;
+      if (url) URL.revokeObjectURL(url);
+    };
+  }, [selectedTicket?.id, selectedTicket?.has_screenshot]);
 
   if (!user?.is_admin) {
     return (
@@ -476,6 +635,7 @@ export default function BackOffice() {
   const kycPage = usePagination(kycRows);
   const limitsPage = usePagination(limitRequests);
   const txnsPage = usePagination(txns);
+  const ticketsPage = usePagination(tickets);
   const feesPage = usePagination(feeRows);
   const providersPage = usePagination(filteredProviders);
 
@@ -594,6 +754,7 @@ export default function BackOffice() {
         <button className={`tab ${tab === "kyc" ? "active" : ""}`} onClick={() => setTab("kyc")}>KYC</button>
         <button className={`tab ${tab === "limits" ? "active" : ""}`} onClick={() => setTab("limits")}>Limit requests</button>
         <button className={`tab ${tab === "transactions" ? "active" : ""}`} onClick={() => setTab("transactions")}>Transactions</button>
+        <button className={`tab ${tab === "tickets" ? "active" : ""}`} onClick={() => setTab("tickets")}>Support</button>
         <button className={`tab ${tab === "fees" ? "active" : ""}`} onClick={() => setTab("fees")}>Service fees</button>
         <button className={`tab ${tab === "services" ? "active" : ""}`} onClick={() => setTab("services")}>Features</button>
         <button className={`tab ${tab === "providers" ? "active" : ""}`} onClick={() => setTab("providers")}>Providers</button>
@@ -607,6 +768,7 @@ export default function BackOffice() {
         <div className="metric-grid mt">
           <div className="metric"><div className="val">{overview.users}</div><div className="lbl">Users</div></div>
           <div className="metric"><div className="val">{overview.pending_kyc ?? 0}</div><div className="lbl">Pending KYC</div></div>
+          <div className="metric"><div className="val">{overview.open_tickets ?? 0}</div><div className="lbl">Open tickets</div></div>
           <div className="metric"><div className="val">{overview.transactions}</div><div className="lbl">Transactions</div></div>
           <div className="metric"><div className="val">{overview.successful_transactions}</div><div className="lbl">Successful</div></div>
           <div className="metric"><div className="val">{money(overview.processed_volume)}</div><div className="lbl">Volume (XAF)</div></div>
@@ -956,9 +1118,13 @@ export default function BackOffice() {
               </div>
               <div>
                 <label>Type</label>
-                <input value={txnFilters.type} onChange={(e) => setTxnFilters({ ...txnFilters, type: e.target.value })} placeholder="ADD_MONEY, SEND_MONEY…" />
+                <input value={txnFilters.type} onChange={(e) => setTxnFilters({ ...txnFilters, type: e.target.value })} placeholder="ADD_MONEY, MONEY_REQUEST_COLLECT…" />
               </div>
             </div>
+            <p className="muted small mt">
+              Use <strong>Verify provider</strong> on Campay-linked rows to pull the live Campay status.
+              When Campay is SUCCESSFUL but FinPay is still pending, a reconciliation dialog opens so you can credit the user and update FinPay.
+            </p>
             <div className="row mt" style={{ maxWidth: 280 }}>
               <button className="btn-primary">Apply filters</button>
               <button
@@ -988,15 +1154,19 @@ export default function BackOffice() {
                         <th>Date</th>
                         <th>Dir</th>
                         <th>Type</th>
+                        <th>Method</th>
                         <th>Sender</th>
+                        <th>Sender phone</th>
                         <th>Receiver</th>
+                        <th>Receiver phone</th>
                         <th>User</th>
-                        <th>Phone</th>
                         <th>Account</th>
                         <th>Reference</th>
+                        <th>Provider ref</th>
                         <th>Status</th>
                         <th className="num">Amount</th>
                         <th className="num">Fee</th>
+                        <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1010,17 +1180,40 @@ export default function BackOffice() {
                             </span>
                           </td>
                           <td className="nowrap">{t.type.replaceAll("_", " ")}</td>
+                          <td className="nowrap">
+                            <span className={`method-pill method-${(t.method || "unknown").toLowerCase()}`}>
+                              {t.method || "—"}
+                            </span>
+                          </td>
                           <td className="party-cell" title={t.sender || ""}>{t.sender || "—"}</td>
+                          <td className="nowrap mono" title={t.sender_phone || ""}>{t.sender_phone || "—"}</td>
                           <td className="party-cell" title={t.receiver || ""}>{t.receiver || "—"}</td>
+                          <td className="nowrap mono" title={t.receiver_phone || ""}>{t.receiver_phone || "—"}</td>
                           <td className="mono">#{t.user_id}</td>
-                          <td className="nowrap">{t.user_phone || "—"}</td>
                           <td className="mono nowrap">{t.account_number || "—"}</td>
                           <td className="mono ref-cell" title={t.reference}>{t.reference}</td>
+                          <td className="mono ref-cell" title={t.provider_reference || ""}>
+                            {t.provider_reference ? `${t.provider_reference.slice(0, 8)}…` : "—"}
+                          </td>
                           <td><span className={`badge ${t.status}`}>{t.status}</span></td>
                           <td className={`num amt ${t.direction === "IN" ? "in" : "out"}`}>
                             {t.direction === "IN" ? "+" : "−"}{money(t.amount)} {t.currency}
                           </td>
                           <td className="num muted">{t.fee > 0 ? money(t.fee) : "—"}</td>
+                          <td>
+                            {t.can_verify_provider ? (
+                              <button
+                                type="button"
+                                className="btn-ghost"
+                                disabled={verifyBusyId === t.id}
+                                onClick={() => verifyProviderTxn(t.id)}
+                              >
+                                {verifyBusyId === t.id ? "Checking…" : "Verify provider"}
+                              </button>
+                            ) : (
+                              <span className="muted small">—</span>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -1033,6 +1226,159 @@ export default function BackOffice() {
                   pageSize={txnsPage.pageSize}
                   onChange={txnsPage.setPage}
                 />
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {tab === "tickets" && (
+        <div className="kyc-admin-layout mt">
+          <div className="card">
+            <h2>Support tickets</h2>
+            <p className="muted small">
+              Review user-reported issues with attached page context and automatic screenshots.
+            </p>
+            <div className="row" style={{ maxWidth: 420, alignItems: "end" }}>
+              <div style={{ flex: 1 }}>
+                <label>Status</label>
+                <select
+                  value={ticketFilter}
+                  onChange={(e) => {
+                    setTicketFilter(e.target.value);
+                    setSelectedTicket(null);
+                  }}
+                >
+                  <option value="IN_PROGRESS">In progress</option>
+                  <option value="OPEN">Open</option>
+                  <option value="RESOLVED">Resolved</option>
+                  <option value="CLOSED">Closed</option>
+                  <option value="ALL">All</option>
+                </select>
+              </div>
+              <button className="btn-ghost" type="button" onClick={() => loadTickets().catch((err) => setMsg(err.message))}>
+                Refresh
+              </button>
+            </div>
+
+            {tickets.length === 0 ? (
+              <div className="empty mt">No tickets for this filter.</div>
+            ) : (
+              <>
+                <div className="mt">
+                  {ticketsPage.pageItems.map((t) => (
+                    <div
+                      className={`txn clickable ${selectedTicket?.id === t.id ? "selected" : ""}`}
+                      key={t.id}
+                      onClick={() => openTicket(t.id)}
+                    >
+                      <div className="meta">
+                        <span>{t.subject}</span>
+                        <span className="muted small">
+                          {t.reference} · {t.user_name || `User #${t.user_id}`} · {t.user_phone || "—"}
+                          {t.has_screenshot ? " · screenshot" : ""}
+                        </span>
+                      </div>
+                      <span className={`badge ${t.status === "RESOLVED" ? "SUCCESS" : t.status === "CLOSED" ? "" : "PROCESSING"}`}>
+                        {t.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <Pagination
+                  page={ticketsPage.page}
+                  totalPages={ticketsPage.totalPages}
+                  total={ticketsPage.total}
+                  pageSize={ticketsPage.pageSize}
+                  onChange={ticketsPage.setPage}
+                />
+              </>
+            )}
+          </div>
+
+          <div className="card kyc-validation-card">
+            <h2>Ticket workspace</h2>
+            {!selectedTicket ? (
+              <div className="empty">Select a ticket to view the issue, screenshot, and thread.</div>
+            ) : (
+              <>
+                <div className="row" style={{ justifyContent: "space-between", alignItems: "start", gap: 12 }}>
+                  <div>
+                    <strong>{selectedTicket.subject}</strong>
+                    <div className="muted small">
+                      {selectedTicket.reference} · {selectedTicket.category} · user #{selectedTicket.user_id}
+                    </div>
+                    <div className="muted small">
+                      {(selectedTicket.user_name || "—")} · {selectedTicket.user_phone || "—"}
+                      {selectedTicket.user_email ? ` · ${selectedTicket.user_email}` : ""}
+                    </div>
+                  </div>
+                  <span className={`badge ${selectedTicket.status === "RESOLVED" ? "SUCCESS" : "PROCESSING"}`}>
+                    {selectedTicket.status}
+                  </span>
+                </div>
+
+                {selectedTicket.page_url && (
+                  <p className="small mt"><span className="muted">Page:</span> {selectedTicket.page_url}</p>
+                )}
+                {selectedTicket.user_agent && (
+                  <p className="small muted" style={{ wordBreak: "break-word" }}>{selectedTicket.user_agent}</p>
+                )}
+                {selectedTicket.context && (
+                  <pre className="mt small" style={{ whiteSpace: "pre-wrap", maxHeight: 160, overflow: "auto" }}>
+                    {JSON.stringify(selectedTicket.context, null, 2)}
+                  </pre>
+                )}
+
+                {ticketShotUrl ? (
+                  <div className="mt">
+                    <label>Screenshot</label>
+                    <img
+                      src={ticketShotUrl}
+                      alt="Ticket screenshot"
+                      style={{ width: "100%", borderRadius: 12, border: "1px solid var(--border)" }}
+                    />
+                  </div>
+                ) : selectedTicket.has_screenshot ? (
+                  <p className="muted small mt">Loading screenshot…</p>
+                ) : (
+                  <p className="muted small mt">No screenshot attached.</p>
+                )}
+
+                <div className="thread mt">
+                  {(selectedTicket.messages || []).map((m) => (
+                    <div key={m.id} className={`bubble ${m.sender === "user" ? "me" : "agent"}`}>
+                      <div className="bubble-sender">{m.sender === "user" ? "User" : "Agent"}</div>
+                      <div>{m.body}</div>
+                      <div className="muted small mt">{new Date(m.created_at).toLocaleString()}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <form onSubmit={sendTicketReply} className="mt">
+                  <label>Reply as agent</label>
+                  <textarea
+                    rows={3}
+                    value={ticketReply}
+                    onChange={(e) => setTicketReply(e.target.value)}
+                    placeholder="Write a reply to the user…"
+                    style={{ width: "100%", padding: "12px 14px", borderRadius: 12, border: "1px solid var(--border)", background: "var(--bg-soft)", color: "var(--text)", fontFamily: "inherit", fontSize: 15 }}
+                  />
+                  <div className="row mt" style={{ gap: 8, flexWrap: "wrap" }}>
+                    <button className="btn-primary" disabled={ticketBusy || !ticketReply.trim()}>
+                      {ticketBusy ? "Sending…" : "Send reply"}
+                    </button>
+                    <button type="button" className="btn-ghost" disabled={ticketBusy} onClick={() => setTicketStatus("RESOLVED")}>
+                      Mark resolved
+                    </button>
+                    <button type="button" className="btn-ghost" disabled={ticketBusy} onClick={() => setTicketStatus("CLOSED")}>
+                      Close
+                    </button>
+                    <button type="button" className="btn-ghost" disabled={ticketBusy} onClick={() => setTicketStatus("IN_PROGRESS")}>
+                      Re-open
+                    </button>
+                  </div>
+                </form>
               </>
             )}
           </div>
@@ -1573,8 +1919,9 @@ export default function BackOffice() {
           <h2>Campay mobile money</h2>
           <p className="muted small">
             Credentials come from <code>.env</code> (<code>CAMPAY_USERNAME</code> / <code>CAMPAY_PASSWORD</code>).
-            Sandbox collect/withdraw calls Campay whenever credentials are set and does not move FinPay wallets.
-            User wallet MoMo only uses Campay when <code>PAYMENT_MODE=live</code>.
+            Sandbox collect/withdraw records <code>CAMPAY_COLLECT</code> / <code>CAMPAY_WITHDRAW</code> in Transactions
+            (trace only — no wallet move). User wallet MoMo / money-request collects use Campay when{" "}
+            <code>PAYMENT_MODE=live</code>.
           </p>
 
           <div className="fee-box mt">
@@ -1829,6 +2176,110 @@ export default function BackOffice() {
           <p className="muted small mt">
             Default per-transaction and daily limits apply to every user (recommended 500,000 XAF). Temporary raises are approved under Limit requests.
           </p>
+        </div>
+      )}
+
+      {reconcileModal && (
+        <div
+          className="reconcile-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="reconcile-modal-title"
+          onClick={() => !reconcileBusy && setReconcileModal(null)}
+        >
+          <div className="reconcile-modal-card" onClick={(e) => e.stopPropagation()}>
+            <div className="reconcile-modal-head">
+              <div>
+                <h2 id="reconcile-modal-title">Provider verification</h2>
+                <p className="muted small">Transaction #{reconcileModal.transactionId}</p>
+              </div>
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={reconcileBusy}
+                onClick={() => setReconcileModal(null)}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className={`reconcile-banner ${reconcileModal.settled ? "ok" : reconcileModal.needs_reconciliation ? "warn" : "info"}`}>
+              {reconcileModal.settled
+                ? "FinPay was updated from the provider result."
+                : reconcileModal.needs_reconciliation
+                  ? "Action required — FinPay is out of sync with Campay."
+                  : "Status checked — no settlement needed right now."}
+            </div>
+
+            <div className="reconcile-status-grid">
+              <div className="reconcile-status-cell">
+                <div className="lbl">Provider (Campay)</div>
+                <div className="val">
+                  <span className={`badge ${reconcileModal.mapped_status === "SUCCESS" ? "SUCCESS" : reconcileModal.mapped_status === "FAILED" ? "FAILED" : "PROCESSING"}`}>
+                    {reconcileModal.provider_status || reconcileModal.mapped_status || "—"}
+                  </span>
+                </div>
+                <div className="muted small">Mapped: {reconcileModal.mapped_status || "—"}</div>
+              </div>
+              <div className="reconcile-status-cell">
+                <div className="lbl">FinPay (system)</div>
+                <div className="val">
+                  <span className={`badge ${reconcileModal.finpay_status || ""}`}>
+                    {reconcileModal.finpay_status || "—"}
+                  </span>
+                </div>
+                <div className="muted small">
+                  Was: {reconcileModal.previous_status || "—"}
+                </div>
+              </div>
+            </div>
+
+            {reconcileModal.transaction && (
+              <div className="reconcile-meta muted small">
+                <div>Type: {reconcileModal.transaction.type}</div>
+                <div>
+                  Amount: {money(reconcileModal.transaction.amount)}{" "}
+                  {reconcileModal.transaction.currency}
+                </div>
+                {reconcileModal.transaction.provider_reference && (
+                  <div>Provider ref: {reconcileModal.transaction.provider_reference}</div>
+                )}
+              </div>
+            )}
+
+            <div className="reconcile-action-box">
+              <div className="lbl">Action required</div>
+              <p>{reconcileModal.action_required || "No further action."}</p>
+              {reconcileModal.settle_error && (
+                <p className="alert alert-error" style={{ marginTop: 8 }}>
+                  {reconcileModal.settle_error}
+                </p>
+              )}
+            </div>
+
+            <div className="reconcile-modal-actions">
+              {reconcileModal.needs_reconciliation && (
+                <button
+                  type="button"
+                  className="btn-primary"
+                  disabled={reconcileBusy}
+                  onClick={reconcileFromModal}
+                >
+                  {reconcileBusy
+                    ? "Reconciling…"
+                    : reconcileModal.action_label || "Reconcile transaction"}
+                </button>
+              )}
+              <button
+                type="button"
+                className="btn-ghost"
+                disabled={reconcileBusy}
+                onClick={() => setReconcileModal(null)}
+              >
+                {reconcileModal.needs_reconciliation ? "Dismiss" : "Done"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
