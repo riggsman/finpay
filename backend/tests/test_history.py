@@ -1,6 +1,6 @@
 from app.core.config import settings
 
-from .conftest import auth_headers, register_active_user
+from .conftest import auth_headers, fund_wallet, register_active_user
 
 API = settings.API_V1_PREFIX
 
@@ -8,12 +8,11 @@ API = settings.API_V1_PREFIX
 def _setup_user_with_txns(client):
     user = register_active_user(client)
     token = user["access_token"]
-    h = auth_headers(token)
-    client.post(f"{API}/wallet/add-money", headers=h, json={"amount": 100000})
-    client.post(f"{API}/wallet/add-money", headers=h, json={"amount": 50000})
+    fund_wallet(client, token, 100000)
+    fund_wallet(client, token, 50000)
     client.post(
         f"{API}/wallet/withdraw",
-        headers=h,
+        headers=auth_headers(token),
         json={"amount": 30000, "destination": "Bank ****9", "pin": "1234"},
     )
     return token

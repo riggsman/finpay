@@ -1,6 +1,6 @@
 from app.core.config import settings
 
-from .conftest import auth_headers, register_active_user
+from .conftest import auth_headers, fund_wallet, register_active_user
 
 API = settings.API_V1_PREFIX
 
@@ -56,7 +56,7 @@ def test_ticket_ownership_enforced(client):
 
 
 def _make_transaction(client, token):
-    client.post(f"{API}/wallet/add-money", headers=auth_headers(token), json={"amount": 10000})
+    fund_wallet(client, token, 10000)
     return client.get(f"{API}/transactions?limit=1", headers=auth_headers(token)).json()[0]["id"]
 
 

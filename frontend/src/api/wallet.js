@@ -2,10 +2,16 @@ import { api } from "./client";
 
 export const walletApi = {
   get: () => api.get("/wallet"),
-  addMoney: (amount, fundingMethod = "card", idempotencyKey) =>
+  addMoney: (amount, fundingMethod = "card", idempotencyKey, phone, cardDetails, bankDetails) =>
     api.post(
       "/wallet/add-money",
-      { amount, funding_method: fundingMethod },
+      {
+        amount,
+        funding_method: fundingMethod,
+        ...(phone ? { phone } : {}),
+        ...(cardDetails ? { card_details: cardDetails } : {}),
+        ...(bankDetails ? { bank_details: bankDetails } : {}),
+      },
       idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}
     ),
   send: (recipient, amount, pin, idempotencyKey) =>
@@ -24,6 +30,7 @@ export const walletApi = {
 
 export const transactionsApi = {
   list: (limit = 20) => api.get(`/transactions?limit=${limit}`),
+  get: (id) => api.get(`/transactions/${id}`),
 };
 
 export const dashboardApi = {
@@ -35,7 +42,8 @@ export const recoveryApi = {
 };
 
 export const notificationsApi = {
-  list: (limit = 20) => api.get(`/notifications?limit=${limit}`),
+  list: (limit = 50) => api.get(`/notifications?limit=${limit}`),
   unreadCount: () => api.get("/notifications/unread-count"),
+  markRead: (id) => api.patch(`/notifications/${id}/read`),
   markAllRead: () => api.patch("/notifications/read-all"),
 };

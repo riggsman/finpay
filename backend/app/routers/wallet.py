@@ -36,6 +36,9 @@ def add_money(
         user_id=current_user.id,
         amount=payload.amount,
         funding_method=payload.funding_method,
+        phone=payload.phone,
+        card_details=payload.card_details,
+        bank_details=payload.bank_details,
         idempotency_key=key,
     )
     return TransactionPublic.model_validate(txn)

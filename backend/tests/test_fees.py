@@ -11,7 +11,8 @@ def _set_fee(client, admin_token, operation, body):
 
 
 def _fund(client, token, amount):
-    client.post(f"{API}/wallet/add-money", headers=auth_headers(token), json={"amount": amount})
+    from .conftest import fund_wallet
+    fund_wallet(client, token, amount)
 
 
 def _balance(client, token):
@@ -76,7 +77,7 @@ def test_deposit_fee_deducted_from_credit(client, admin_token):
              {"fee_type": "FLAT", "config": {"fee": 500}, "active": True})
     user = register_active_user(client)
     token = user["access_token"]
-    client.post(f"{API}/wallet/add-money", headers=auth_headers(token), json={"amount": 100000})
+    _fund(client, token, 100000)
     # credited amount - fee
     assert _balance(client, token) == 100000 - 500
 

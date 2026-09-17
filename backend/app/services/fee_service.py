@@ -7,15 +7,22 @@ from app.models.fees import FeeRule, ServiceFlag
 # Fee-bearing operations (SRS section 71.1).
 FEE_OPERATIONS = ["DEPOSIT", "WITHDRAW", "SEND_MONEY", "ELECTRICITY", "AIRTIME", "DATA"]
 
-# Front-store services and operation toggles (SRS section 72).
+# Front-store services, money operations, funding methods, and notification email categories.
 DEFAULT_SERVICE_FLAGS = [
-    ("electricity", "Electricity", "service", True),
-    ("airtime", "Airtime", "service", True),
-    ("data", "Data Bundles", "service", True),
-    ("water", "Water", "service", False),
-    ("add_money", "Add Money", "operation", True),
-    ("withdraw", "Withdraw", "operation", True),
-    ("send_money", "Send Money", "operation", True),
+    ("electricity", "Electricity", "service", True, True),
+    ("airtime", "Airtime", "service", True, True),
+    ("data", "Data Bundles", "service", True, True),
+    ("water", "Water", "service", False, True),
+    ("add_money", "Add Money", "operation", True, True),
+    ("withdraw", "Withdraw", "operation", True, True),
+    ("send_money", "Send Money", "operation", True, True),
+    # Deposit funding rails shown on Add Money (admin-togglable).
+    ("funding_card", "Deposit — Card", "funding", True, False),
+    ("funding_bank", "Deposit — Bank transfer", "funding", True, False),
+    ("funding_mobile_money", "Deposit — Mobile money", "funding", True, False),
+    ("kyc", "KYC verification", "notification", True, True),
+    ("security", "Security alerts", "notification", True, True),
+    ("support", "Support & disputes", "notification", True, True),
 ]
 
 
@@ -28,9 +35,12 @@ def seed_defaults(db: Session) -> None:
                            config=json.dumps({"fee": 0}), active=True))
 
     existing_keys = {f.key for f in db.query(ServiceFlag).all()}
-    for key, label, kind, enabled in DEFAULT_SERVICE_FLAGS:
+    for key, label, kind, enabled, email_enabled in DEFAULT_SERVICE_FLAGS:
         if key not in existing_keys:
-            db.add(ServiceFlag(key=key, label=label, kind=kind, enabled=enabled))
+            db.add(ServiceFlag(
+                key=key, label=label, kind=kind,
+                enabled=enabled, email_enabled=email_enabled,
+            ))
     db.commit()
 
 
@@ -48,6 +58,22 @@ def compute_fee(db: Session, operation: str, amount: int) -> int:
     if not rule or not rule.active:
         return 0
     return _fee_from_rule(rule.fee_type, _rule_config(rule), amount)
+
+
+def attach_fee(db: Session, txn, operation: str, amount: int) -> int:
+    """Stamp the configured service fee onto a transaction before any ledger move.
+
+    Call this before debiting/crediting the wallet. Outbound flows should then
+    debit ``amount + fee``; deposits should credit ``amount - fee``.
+    """
+    from app.core.exceptions import ValidationError
+
+    if amount <= 0:
+        raise ValidationError("Amount must be positive.", code="INVALID_AMOUNT")
+    fee = compute_fee(db, operation, amount)
+    txn.amount = int(amount)
+    txn.fee = int(fee)
+    return fee
 
 
 def _fee_from_rule(fee_type: str, cfg: dict, amount: int) -> int:
@@ -96,7 +122,13 @@ def get_service_flags(db: Session, enabled_only: bool = False) -> list[dict]:
     if enabled_only:
         q = q.filter(ServiceFlag.enabled.is_(True))
     return [
-        {"key": f.key, "label": f.label, "kind": f.kind, "enabled": f.enabled}
+        {
+            "key": f.key,
+            "label": f.label,
+            "kind": f.kind,
+            "enabled": f.enabled,
+            "email_enabled": f.email_enabled,
+        }
         for f in q.order_by(ServiceFlag.kind, ServiceFlag.key).all()
     ]
 
@@ -104,6 +136,12 @@ def get_service_flags(db: Session, enabled_only: bool = False) -> list[dict]:
 def is_service_enabled(db: Session, key: str) -> bool:
     flag = db.query(ServiceFlag).filter(ServiceFlag.key == key).one_or_none()
     return True if flag is None else flag.enabled
+
+
+def is_email_enabled(db: Session, key: str) -> bool:
+    """Whether email alerts are on for a service. Missing flags default to True."""
+    flag = db.query(ServiceFlag).filter(ServiceFlag.key == key).one_or_none()
+    return True if flag is None else bool(flag.email_enabled)
 
 
 def ensure_enabled(db: Session, key: str) -> None:
@@ -118,4 +156,9 @@ def get_client_config(db: Session) -> dict:
     return {
         "fees": get_fee_config(db),
         "services": get_service_flags(db),
+        "funding_methods": {
+            "card": is_service_enabled(db, "funding_card"),
+            "bank": is_service_enabled(db, "funding_bank"),
+            "mobile_money": is_service_enabled(db, "funding_mobile_money"),
+        },
     }

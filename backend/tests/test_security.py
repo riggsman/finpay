@@ -6,7 +6,8 @@ API = settings.API_V1_PREFIX
 
 
 def _fund(client, token, amount):
-    client.post(f"{API}/wallet/add-money", headers=auth_headers(token), json={"amount": amount})
+    from .conftest import fund_wallet
+    fund_wallet(client, token, amount)
 
 
 def _withdraw(client, token, amount, pin="1234"):
@@ -17,16 +18,33 @@ def _withdraw(client, token, amount, pin="1234"):
     )
 
 
-def test_update_profile(client):
+def _set_admin_limits(client, admin_token, per_txn_limit: int, daily_limit: int):
+    """Change platform default limits via Back Office settings."""
+    r = client.put(
+        f"{API}/admin/settings",
+        headers=auth_headers(admin_token),
+        json={
+            "values": {
+                "default_per_txn_limit": str(per_txn_limit),
+                "default_daily_limit": str(daily_limit),
+            }
+        },
+    )
+    assert r.status_code == 200
+
+
+def test_profile_update_locked(client):
     user = register_active_user(client)
     r = client.patch(
         f"{API}/me/profile",
         headers=auth_headers(user["access_token"]),
         json={"first_name": "Secure", "last_name": "Person"},
     )
-    assert r.status_code == 200
-    assert r.json()["first_name"] == "Secure"
-    assert r.json()["last_name"] == "Person"
+    assert r.status_code == 403
+    assert r.json()["error"]["code"] == "PROFILE_LOCKED"
+    me = client.get(f"{API}/me", headers=auth_headers(user["access_token"])).json()
+    assert me["first_name"] == "Test"
+    assert me["last_name"] == "User"
 
 
 def test_change_password_revokes_sessions(client):
@@ -84,46 +102,37 @@ def test_change_pin_and_old_pin_invalidated(client):
     assert _withdraw(client, token, 5000, pin="4321").status_code == 200
 
 
-def test_per_transaction_limit_enforced(client):
+def test_limits_update_locked(client):
+    user = register_active_user(client)
+    r = client.patch(
+        f"{API}/me/security/limits",
+        headers=auth_headers(user["access_token"]),
+        json={"per_txn_limit": 10000, "daily_limit": 50000},
+    )
+    assert r.status_code == 403
+    assert r.json()["error"]["code"] == "LIMITS_LOCKED"
+
+
+def test_per_transaction_limit_enforced(client, admin_token):
     user = register_active_user(client)
     token = user["access_token"]
     _fund(client, token, 500000)
-    client.patch(
-        f"{API}/me/security/limits",
-        headers=auth_headers(token),
-        json={"per_txn_limit": 10000},
-    )
+    _set_admin_limits(client, admin_token, per_txn_limit=10000, daily_limit=500000)
     over = _withdraw(client, token, 20000)
     assert over.status_code == 422
     assert over.json()["error"]["code"] == "PER_TXN_LIMIT_EXCEEDED"
     assert _withdraw(client, token, 5000).status_code == 200
 
 
-def test_daily_limit_enforced(client):
+def test_daily_limit_enforced(client, admin_token):
     user = register_active_user(client)
     token = user["access_token"]
     _fund(client, token, 500000)
-    resp = client.patch(
-        f"{API}/me/security/limits",
-        headers=auth_headers(token),
-        json={"per_txn_limit": 15000, "daily_limit": 15000},
-    )
-    assert resp.status_code == 200
+    _set_admin_limits(client, admin_token, per_txn_limit=15000, daily_limit=15000)
     assert _withdraw(client, token, 10000).status_code == 200
     second = _withdraw(client, token, 10000)  # 20000 total > 15000 daily
     assert second.status_code == 422
     assert second.json()["error"]["code"] == "DAILY_LIMIT_EXCEEDED"
-
-
-def test_invalid_limit_range_rejected(client):
-    user = register_active_user(client)
-    r = client.patch(
-        f"{API}/me/security/limits",
-        headers=auth_headers(user["access_token"]),
-        json={"per_txn_limit": 100000, "daily_limit": 5000},
-    )
-    assert r.status_code == 422
-    assert r.json()["error"]["code"] == "INVALID_LIMIT_RANGE"
 
 
 def test_sessions_list_and_revoke(client):

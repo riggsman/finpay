@@ -6,7 +6,8 @@ API = settings.API_V1_PREFIX
 
 
 def _fund(client, token, amount):
-    client.post(f"{API}/wallet/add-money", headers=auth_headers(token), json={"amount": amount})
+    from .conftest import fund_wallet
+    fund_wallet(client, token, amount)
 
 
 def _validate(client, token, meter="1234567890"):

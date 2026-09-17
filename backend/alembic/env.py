@@ -22,6 +22,7 @@ import app.models.device  # noqa: F401
 import app.models.audit  # noqa: F401
 import app.models.fees  # noqa: F401
 import app.models.catalog  # noqa: F401
+import app.models.phone_lookup  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)

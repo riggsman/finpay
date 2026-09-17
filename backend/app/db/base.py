@@ -14,6 +14,7 @@ from app.models import (  # noqa: E402,F401
     transaction,
     notification,
     billing,
+    campay,
     password_reset,
     kyc,
     support,
@@ -22,4 +23,5 @@ from app.models import (  # noqa: E402,F401
     audit,
     fees,
     catalog,
+    phone_lookup,
 )

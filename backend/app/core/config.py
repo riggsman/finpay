@@ -29,23 +29,30 @@ class Settings(BaseSettings):
     RESET_CODE_TTL_SECONDS: int = 300
     RESET_TOKEN_TTL_SECONDS: int = 600
 
-    # Default transaction limits (minor units).
+    # Default transaction limits (minor units) — 500,000.00 XAF each.
     DEFAULT_PER_TXN_LIMIT: int = 50_000_000  # 500,000.00
-    DEFAULT_DAILY_LIMIT: int = 200_000_000  # 2,000,000.00
+    DEFAULT_DAILY_LIMIT: int = 50_000_000  # 500,000.00
 
-    # Higher limits granted once KYC is approved.
+    # Legacy env fallbacks (limit raises are admin-approved requests, not KYC).
     KYC_APPROVED_PER_TXN_LIMIT: int = 200_000_000  # 2,000,000.00
     KYC_APPROVED_DAILY_LIMIT: int = 1_000_000_000  # 10,000,000.00
-    # Simulated KYC review delay (seconds).
+    # Simulated KYC review delay (seconds). Set KYC_AUTO_REVIEW_ENABLED=false
+    # so Back Office admins validate submissions manually.
     KYC_REVIEW_DELAY_SECONDS: float = 2.0
+    KYC_AUTO_REVIEW_ENABLED: bool = False
+    KYC_UPLOAD_DIR: str = "uploads/kyc"
 
     # Default transaction PIN assigned at activation (development convenience).
     DEFAULT_TRANSACTION_PIN: str = "1234"
 
     # Back Office bootstrap admin (seeded on startup for development).
-    ADMIN_EMAIL: str = "admin@finpay.app"
+    ADMIN_EMAIL: str = "admin@local.dev"
     ADMIN_PHONE: str = "+237600000001"
     ADMIN_PASSWORD: str = "admin1234"
+
+    # Shared mailbox domain for all FinPay users (dev/test notifications).
+    # New accounts get emails like john@local.dev.
+    USER_EMAIL_DOMAIN: str = "local.dev"
     # Validation token lifetime for bill payments (seconds).
     VALIDATION_TOKEN_TTL_SECONDS: int = 300
     # Simulated provider processing delay (seconds) for the electricity flow.
@@ -87,7 +94,9 @@ class Settings(BaseSettings):
     FCM_ALWAYS_PRIORITIES: str = "CRITICAL"
 
     # --- Email notifications ---
-    # EMAIL_BACKEND: "console" (logs emails, default), "smtp", or "disabled".
+    # EMAIL_BACKEND: console (logs emails, default), smtp, or disabled.
+    # In development the embedded mail catcher starts with the API and routes
+    # console/local smtp traffic to it automatically.
     EMAIL_BACKEND: str = "console"
     SMTP_HOST: str = ""
     SMTP_PORT: int = 587
@@ -95,6 +104,29 @@ class Settings(BaseSettings):
     SMTP_PASSWORD: str = ""
     SMTP_USE_TLS: bool = True
     EMAIL_FROM: str = "no-reply@finpay.app"
+
+    # Embedded local mail catcher (no Docker). Auto-started with the backend
+    # when ENVIRONMENT is development/dev/local.
+    DEV_MAIL_SERVER_ENABLED: bool = True
+    DEV_MAIL_SMTP_HOST: str = "127.0.0.1"
+    DEV_MAIL_SMTP_PORT: int = 1025
+    DEV_MAIL_WEB_HOST: str = "127.0.0.1"
+    DEV_MAIL_WEB_PORT: int = 1080
+
+    # --- Campay (mobile money collection / withdrawal) ---
+    # Secrets must come from environment / .env — never commit real values.
+    # Credentials alone enable the Back Office Campay sandbox. Wallet MoMo
+    # collect/withdraw still require PAYMENT_MODE=live (see campay_configured()).
+    CAMPAY_USERNAME: str = ""
+    CAMPAY_PASSWORD: str = ""
+    CAMPAY_BASE_URL: str = "https://demo.campay.net"
+    CAMPAY_WEBHOOK_KEY: str = ""
+    CAMPAY_TIMEOUT_SECONDS: float = 30.0
+
+    # Payment mode switch: "simulated" keeps wallet deposits/withdrawals on the
+    # local mock path (safe for demos). "live" routes MoMo through Campay when
+    # credentials are present. Admin sandbox can call Campay in either mode.
+    PAYMENT_MODE: str = "simulated"
 
     @property
     def cors_origins_list(self) -> list[str]:
@@ -115,6 +147,18 @@ class Settings(BaseSettings):
             or self.GOOGLE_APPLICATION_CREDENTIALS
             or (self.FIREBASE_PROJECT_ID and self.FIREBASE_CLIENT_EMAIL and self.FIREBASE_PRIVATE_KEY)
         )
+
+    @property
+    def campay_configured(self) -> bool:
+        return bool((self.CAMPAY_USERNAME or "").strip() and (self.CAMPAY_PASSWORD or "").strip())
+
+    @property
+    def payment_mode(self) -> str:
+        return (self.PAYMENT_MODE or "simulated").strip().lower()
+
+    @property
+    def payments_live(self) -> bool:
+        return self.payment_mode == "live"
 
 
 @lru_cache

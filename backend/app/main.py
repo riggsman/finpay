@@ -13,6 +13,7 @@ from app.routers import (
     admin,
     auth,
     bill_payments,
+    campay_admin,
     config as config_router,
     dashboard,
     devices,
@@ -66,6 +67,17 @@ async def lifespan(app: FastAPI):
         db.close()
 
     logger.info("FinPay backend started (env=%s)", settings.ENVIRONMENT)
+
+    # Embedded local mail catcher for development notification testing.
+    from app.notifications.dev_mail import (
+        should_start as should_start_dev_mail,
+        start_dev_mail_server,
+        stop_dev_mail_server,
+    )
+
+    if should_start_dev_mail():
+        start_dev_mail_server()
+
     worker = None
     if settings.RECONCILE_WORKER_ENABLED:
         worker = asyncio.create_task(_reconciliation_worker())
@@ -74,6 +86,7 @@ async def lifespan(app: FastAPI):
     yield
     if worker:
         worker.cancel()
+    stop_dev_mail_server()
     logger.info("FinPay backend shutting down")
 
 
@@ -134,6 +147,8 @@ app.include_router(support.router, prefix=api)
 app.include_router(social.router, prefix=api)
 app.include_router(config_router.router, prefix=api)
 app.include_router(admin.router, prefix=api)
+app.include_router(campay_admin.admin_router, prefix=api)
+app.include_router(campay_admin.webhook_router, prefix=api)
 
 # Wrap the FastAPI app with the Socket.IO ASGI app so both share one server.
-asgi = socketio.ASGIApp(sio, other_asgi_app=app, socketio_path="socket.io")
+app = socketio.ASGIApp(sio, other_asgi_app=app, socketio_path="socket.io")

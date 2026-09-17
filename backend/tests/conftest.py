@@ -15,6 +15,7 @@ def _fast_provider():
     # Speed up simulated async operations so completion tests are quick.
     settings.PROVIDER_PROCESSING_DELAY_SECONDS = 0.1
     settings.KYC_REVIEW_DELAY_SECONDS = 0.1
+    settings.KYC_AUTO_REVIEW_ENABLED = True
     # Reconcile deterministically via the manual endpoint; no background worker.
     settings.RECONCILE_WORKER_ENABLED = False
     settings.RECONCILE_MIN_AGE_SECONDS = 0
@@ -45,7 +46,10 @@ def _reset_fees_and_services():
             {FeeRule.fee_type: "FLAT", FeeRule.config: json.dumps({"fee": 0}),
              FeeRule.active: True}
         )
-        db.query(ServiceFlag).update({ServiceFlag.enabled: True})
+        db.query(ServiceFlag).update({
+            ServiceFlag.enabled: True,
+            ServiceFlag.email_enabled: True,
+        })
         db.query(ServiceProvider).update({ServiceProvider.enabled: True})
         # Reset editable settings to their seeded defaults.
         defaults = {k: v for k, v, _t, _l in catalog_service.DEFAULT_SETTINGS}
@@ -90,7 +94,7 @@ def register_active_user(client: TestClient, password: str = "Password123") -> d
             "phone": phone,
             "first_name": "Test",
             "last_name": "User",
-            "email": f"{phone.strip('+')}@example.com",
+            "email": f"{phone.strip('+')}@local.dev",
             "password": password,
         },
     )
@@ -103,6 +107,36 @@ def register_active_user(client: TestClient, password: str = "Password123") -> d
 
 def auth_headers(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
+
+
+SAMPLE_CARD_DETAILS = {
+    "card_number": "4111111111111111",
+    "card_holder": "Test User",
+    "expiry_month": 12,
+    "expiry_year": 2030,
+    "cvv": "123",
+}
+
+SAMPLE_BANK_DETAILS = {
+    "bank_code": "BICXXXX",
+    "account_number": "0123456789",
+    "account_holder": "Test User",
+}
+
+
+def fund_wallet(client: TestClient, token: str, amount: int) -> dict:
+    """Credit via card (mock) with required card_details."""
+    r = client.post(
+        f"{API}/wallet/add-money",
+        headers=auth_headers(token),
+        json={
+            "amount": amount,
+            "funding_method": "card",
+            "card_details": SAMPLE_CARD_DETAILS,
+        },
+    )
+    assert r.status_code == 200, r.text
+    return r.json()
 
 
 def wait_for_status(client: TestClient, token: str, txn_id: int,

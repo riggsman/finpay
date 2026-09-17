@@ -6,7 +6,8 @@ API = settings.API_V1_PREFIX
 
 
 def _fund(client, token, amount):
-    client.post(f"{API}/wallet/add-money", headers=auth_headers(token), json={"amount": amount})
+    from .conftest import fund_wallet
+    fund_wallet(client, token, amount)
 
 
 def _confirm(client, token, meter, amount=100000):
@@ -34,8 +35,9 @@ def test_provider_timeout_stays_pending_not_failed(client):
     txn = _confirm(client, token, "1234565555")  # ...5555 => provider timeout
     assert txn["status"] == "PENDING"
     assert txn["failure_reason"] is None
-    # No debit while pending.
-    assert _balance(client, token) == 300000
+    # Amount + fee are held immediately while the provider result is unknown.
+    assert _balance(client, token) == 200000
+    assert txn["fee"] == 0  # default zero fee in tests
 
 
 def test_reconcile_settles_success_and_debits(client):
@@ -43,6 +45,7 @@ def test_reconcile_settles_success_and_debits(client):
     token = user["access_token"]
     _fund(client, token, 300000)
     txn = _confirm(client, token, "1234565555")
+    assert _balance(client, token) == 200000  # already held
 
     res = client.post(f"{API}/transactions/reconcile", headers=auth_headers(token))
     assert res.status_code == 200
@@ -51,6 +54,7 @@ def test_reconcile_settles_success_and_debits(client):
     settled = client.get(f"{API}/transactions/{txn['id']}", headers=auth_headers(token)).json()
     assert settled["status"] == "SUCCESS"
     assert settled["provider_reference"]
+    # No second debit on reconcile — hold stands.
     assert _balance(client, token) == 200000
 
     events = client.get(
@@ -61,19 +65,20 @@ def test_reconcile_settles_success_and_debits(client):
     assert types[-1] == "TRANSACTION_SUCCESS"
 
 
-def test_reconcile_settles_failed_without_debit(client):
+def test_reconcile_settles_failed_refunds_hold(client):
     user = register_active_user(client)
     token = user["access_token"]
     _fund(client, token, 300000)
     txn = _confirm(client, token, "1234564444")  # ...4444 => reconcile to FAILED
     assert txn["status"] == "PENDING"
+    assert _balance(client, token) == 200000  # held
 
     client.post(f"{API}/transactions/reconcile", headers=auth_headers(token))
 
     settled = client.get(f"{API}/transactions/{txn['id']}", headers=auth_headers(token)).json()
     assert settled["status"] == "FAILED"
     assert settled["failure_reason"]
-    # Never charged on failure.
+    # Hold refunded on failure.
     assert _balance(client, token) == 300000
 
 

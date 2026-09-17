@@ -1,6 +1,6 @@
 from app.core.config import settings
 
-from .conftest import auth_headers, register_active_user
+from .conftest import auth_headers, fund_wallet, register_active_user
 
 API = settings.API_V1_PREFIX
 
@@ -19,22 +19,24 @@ def test_login_is_audited(client):
 def test_money_and_security_actions_audited(client):
     user = register_active_user(client)
     token = user["access_token"]
-    client.post(f"{API}/wallet/add-money", headers=auth_headers(token), json={"amount": 10000})
+    fund_wallet(client, token, 10000)
     client.put(f"{API}/me/security/pin", headers=auth_headers(token),
                json={"current_pin": "1234", "new_pin": "4321"})
-    client.patch(f"{API}/me/security/limits", headers=auth_headers(token),
-                 json={"per_txn_limit": 30000000})
+    # Limits are system-managed; PATCH is locked and must not audit LIMITS_UPDATED.
+    locked = client.patch(f"{API}/me/security/limits", headers=auth_headers(token),
+                          json={"per_txn_limit": 30000000})
+    assert locked.status_code == 403
     client.post(f"{API}/me/devices", headers=auth_headers(token),
                 json={"device_id": "d1", "push_token": "T1"})
 
     actions = set(_activity_actions(client, token))
-    assert {"TRANSACTION_CREATED", "PIN_CHANGED", "LIMITS_UPDATED", "DEVICE_REGISTERED"} <= actions
+    assert {"TRANSACTION_CREATED", "PIN_CHANGED", "DEVICE_REGISTERED"} <= actions
+    assert "LIMITS_UPDATED" not in actions
 
 
 def test_audit_records_ip(client):
     user = register_active_user(client)
-    client.post(f"{API}/wallet/add-money", headers=auth_headers(user["access_token"]),
-                json={"amount": 5000})
+    fund_wallet(client, user["access_token"], 5000)
     rows = client.get(f"{API}/me/security/activity",
                       headers=auth_headers(user["access_token"])).json()
     txn_rows = [r for r in rows if r["action"] == "TRANSACTION_CREATED"]

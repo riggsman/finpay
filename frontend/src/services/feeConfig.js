@@ -64,3 +64,33 @@ export function isServiceEnabled(key) {
   const flag = cfg.services.find((s) => s.key === key);
   return flag ? flag.enabled : true;
 }
+
+/** Deposit funding rails controlled by admin feature flags. */
+export function isFundingMethodEnabled(methodId) {
+  const cfg = getConfig();
+  const key =
+    methodId === "card"
+      ? "card"
+      : methodId === "bank"
+        ? "bank"
+        : methodId === "mobile_money"
+          ? "mobile_money"
+          : null;
+  if (key && cfg?.funding_methods && typeof cfg.funding_methods[key] === "boolean") {
+    return cfg.funding_methods[key];
+  }
+  const flagKey =
+    methodId === "card"
+      ? "funding_card"
+      : methodId === "bank"
+        ? "funding_bank"
+        : methodId === "mobile_money"
+          ? "funding_mobile_money"
+          : null;
+  if (!flagKey) return false;
+  return isServiceEnabled(flagKey);
+}
+
+export function enabledFundingMethods(allMethods) {
+  return (allMethods || []).filter((m) => isFundingMethodEnabled(m.id));
+}

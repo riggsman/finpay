@@ -6,7 +6,8 @@ API = settings.API_V1_PREFIX
 
 
 def _fund(client, token, amount):
-    client.post(f"{API}/wallet/add-money", headers=auth_headers(token), json={"amount": amount})
+    from .conftest import fund_wallet
+    fund_wallet(client, token, amount)
 
 
 def _topup(client, token, category="airtime", provider="mtn", target="+237650001234",
@@ -95,4 +96,5 @@ def test_topup_unknown_category(client):
     _fund(client, token, 500000)
     r = _topup(client, token, category="gaming")
     assert r.status_code == 422
-    assert r.json()["error"]["code"] == "UNKNOWN_CATEGORY"
+    # Categories are catalog-driven; unknown category+provider resolves as unknown provider.
+    assert r.json()["error"]["code"] == "UNKNOWN_PROVIDER"
